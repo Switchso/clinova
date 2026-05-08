@@ -11,6 +11,8 @@ const state = {
   reportTab: "overview",
 };
 
+const APP_VERSION = "1.2.0";
+
 const labels = {
   calendar: "التقويم",
   dashboard: "لوحة التحكم",
@@ -178,15 +180,11 @@ function renderLoginLegacy(error = "") {
             <div class="muted">نظام إدارة العيادة</div>
           </div>
         </div>
-        <div class="login-note">
-          <strong>CMS SUZAN</strong>
-          <span>إدارة المواعيد والعملاء والخدمات والتقارير من مكان واحد آمن.</span>
-        </div>
         ${error ? `<div class="alert">${error}</div>` : ""}
         <div class="field"><label>اسم المستخدم</label><input name="username" autocomplete="username" required></div>
         <div class="field"><label>كلمة المرور</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn" style="width:100%">تسجيل الدخول</button>
-        <p class="muted">الحساب الأول بعد التثبيت: admin / ChangeMe123!</p>
+        <div class="version-badge">v${APP_VERSION}</div>
       </form>
     </main>
   `);
@@ -991,7 +989,7 @@ function bindPageActions() {
     try {
       await api("/api/account/password", { method: "POST", body: Object.fromEntries(new FormData(passwordForm)) });
       state.user = null;
-      renderLogin("تم تغيير كلمة المرور. سجل الدخول من جديد.");
+      renderLogin();
     } catch (err) {
       document.querySelector(".content").innerHTML = renderSettingsProduct(err.message);
       bindPageActions();
@@ -1470,7 +1468,7 @@ function renderApp() {
       <aside class="sidebar">
         <div class="brand">
           <img class="brand-logo" src="${logoSrc()}" alt="CMS SUZAN">
-          <div><h3>CMS SUZAN</h3><div style="opacity:.75;font-size:12px">ניהול קליניקה</div></div>
+          <div><h3>CMS SUZAN</h3><div style="opacity:.75;font-size:12px">ניהול קליניקה</div><div class="app-version">v${APP_VERSION}</div></div>
         </div>
         <nav class="nav">${nav.map((page) => `<button data-page="${page}" class="${state.page === page ? "active" : ""}">${pageLabel(page)}</button>`).join("")}</nav>
         <div class="user-box">
@@ -1657,12 +1655,11 @@ function renderLogin(error = "") {
           <img class="brand-logo" src="${logoSrc()}" alt="CMS SUZAN">
           <div><h1>CMS SUZAN</h1><div class="muted">מערכת ניהול קליניקה</div></div>
         </div>
-        <div class="login-note"><strong>CMS SUZAN</strong><span>ניהול תורים, לקוחות, שירותים ודוחות במקום אחד ובצורה מאובטחת.</span></div>
         ${error ? `<div class="alert">${error}</div>` : ""}
         <div class="field"><label>שם משתמש</label><input name="username" autocomplete="username" required></div>
         <div class="field"><label>סיסמה</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn" style="width:100%">כניסה</button>
-        <p class="muted">החשבון הראשון לאחר התקנה: admin / ChangeMe123!</p>
+        <div class="version-badge">v${APP_VERSION}</div>
       </form>
     </main>
   `);
