@@ -1,0 +1,26 @@
+{
+  "name": "clinic-management-system",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/app.js",
+    "dev": "node --watch server/app.js",
+    "init-db": "node server/app.js --init-db",
+    "backup": "node server/backup.js",
+    "restore": "node server/restore.js",
+    "pg:migrate": "node server/postgres/migrate-sqlite-to-postgres.js",
+    "pm2:start": "npx pm2 start ecosystem.config.cjs",
+    "pm2:reload": "npx pm2 reload ecosystem.config.cjs --update-env",
+    "pm2:restart": "npx pm2 restart cms-suzan",
+    "pm2:logs": "npx pm2 logs cms-suzan",
+    "pm2:save": "npx pm2 save"
+  },
+  "dependencies": {
+    "pm2": "^7.0.1",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
