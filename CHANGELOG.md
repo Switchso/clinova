@@ -11,6 +11,9 @@
 - Added database adapter support for PostgreSQL through `DATABASE_URL`.
 - Added PostgreSQL schema and updated SQLite-to-PostgreSQL migration to include settings, client files, and payment fields.
 - Updated health check to show the active database engine.
+- Added professional client file uploads with type and size validation.
+- Added protected download links for uploaded client files.
+- Added upload storage settings and excluded uploaded files from Git.
 
 ## 1.2.0
 

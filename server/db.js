@@ -157,6 +157,10 @@ async function initSqlite() {
       client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       url TEXT NOT NULL,
+      original_name TEXT DEFAULT '',
+      mime_type TEXT DEFAULT '',
+      size INTEGER NOT NULL DEFAULT 0,
+      path TEXT DEFAULT '',
       notes TEXT DEFAULT '',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -184,6 +188,10 @@ async function initSqlite() {
   await ensureSqliteColumn("appointments", "active", "INTEGER NOT NULL DEFAULT 1");
   await ensureSqliteColumn("appointments", "payment_status", "TEXT NOT NULL DEFAULT 'unpaid'");
   await ensureSqliteColumn("appointments", "paid_amount", "REAL NOT NULL DEFAULT 0");
+  await ensureSqliteColumn("client_files", "original_name", "TEXT DEFAULT ''");
+  await ensureSqliteColumn("client_files", "mime_type", "TEXT DEFAULT ''");
+  await ensureSqliteColumn("client_files", "size", "INTEGER NOT NULL DEFAULT 0");
+  await ensureSqliteColumn("client_files", "path", "TEXT DEFAULT ''");
 }
 
 async function initPostgres() {

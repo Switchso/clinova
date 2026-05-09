@@ -29,4 +29,12 @@ export const config = {
     time: process.env.BACKUP_TIME || "02:00",
     runOnStart: String(process.env.BACKUP_RUN_ON_START || "false").toLowerCase() === "true",
   },
+  uploads: {
+    dir: resolve(process.env.UPLOAD_DIR || "./uploads"),
+    maxBytes: Math.max(1024 * 1024, Number(process.env.UPLOAD_MAX_MB || 10) * 1024 * 1024),
+    allowedTypes: String(process.env.UPLOAD_ALLOWED_TYPES || "image/jpeg,image/png,image/webp,application/pdf")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  },
 };

@@ -129,9 +129,22 @@ async function copyClientFiles(client) {
   const rows = sqlite.prepare("SELECT * FROM client_files ORDER BY id").all();
   for (const row of rows) {
     await client.query(
-      `INSERT INTO client_files (id, client_id, name, url, notes, active, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [row.id, row.client_id, row.name, row.url, row.notes || "", Number(row.active ?? 1), row.created_at, row.updated_at]
+      `INSERT INTO client_files (id, client_id, name, url, original_name, mime_type, size, path, notes, active, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        row.id,
+        row.client_id,
+        row.name,
+        row.url,
+        row.original_name || "",
+        row.mime_type || "",
+        row.size || 0,
+        row.path || "",
+        row.notes || "",
+        Number(row.active ?? 1),
+        row.created_at,
+        row.updated_at,
+      ]
     );
   }
 }

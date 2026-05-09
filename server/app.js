@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, extname, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { db, databaseEngine, initDatabase, rowToUser, audit } from "./db.js";
 import { config } from "./config.js";
 import { createBackup } from "./backup.js";
@@ -49,6 +50,73 @@ function json(res, status, data) {
     "X-Content-Type-Options": "nosniff",
   });
   res.end(body);
+}
+
+function safeFileName(name) {
+  const parsed = basename(String(name || "file")).replace(/[^\p{L}\p{N}._ -]/gu, "_").trim();
+  return parsed || "file";
+}
+
+function contentDispositionName(name) {
+  return encodeURIComponent(safeFileName(name)).replace(/['()]/g, escape);
+}
+
+async function readRawBody(req, maxBytes = config.uploads.maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      const error = new Error(`הקובץ גדול מדי. הגודל המקסימלי הוא ${Math.round(maxBytes / 1024 / 1024)}MB`);
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readMultipart(req) {
+  const contentType = req.headers["content-type"] || "";
+  const boundary = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)?.[1] || contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)?.[2];
+  if (!boundary) {
+    const error = new Error("בקשת העלאה לא תקינה");
+    error.status = 400;
+    throw error;
+  }
+
+  const raw = await readRawBody(req);
+  const body = raw.toString("latin1");
+  const fields = {};
+  const files = {};
+
+  for (const part of body.split(`--${boundary}`)) {
+    if (!part || part === "--\r\n" || part === "--") continue;
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd === -1) continue;
+    const header = part.slice(0, headerEnd);
+    let content = part.slice(headerEnd + 4);
+    if (content.endsWith("\r\n")) content = content.slice(0, -2);
+    if (content.endsWith("--")) content = content.slice(0, -2);
+
+    const disposition = header.match(/content-disposition:\s*form-data;([^\r\n]+)/i)?.[1] || "";
+    const name = disposition.match(/name="([^"]+)"/i)?.[1];
+    if (!name) continue;
+    const filename = disposition.match(/filename="([^"]*)"/i)?.[1];
+    const type = header.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim() || "application/octet-stream";
+
+    if (filename) {
+      files[name] = {
+        filename: safeFileName(filename),
+        type,
+        buffer: Buffer.from(content, "latin1"),
+      };
+    } else {
+      fields[name] = Buffer.from(content, "latin1").toString("utf8");
+    }
+  }
+
+  return { fields, files };
 }
 
 function clientIp(req) {
@@ -242,11 +310,19 @@ async function updateClinicSettings(values) {
 
 async function clientFiles(clientId) {
   return await db.prepare(`
-    SELECT id, client_id AS clientId, name, url, notes, created_at AS createdAt
+    SELECT id, client_id AS clientId, name, url, original_name AS originalName, mime_type AS mimeType, size, notes, created_at AS createdAt
     FROM client_files
     WHERE active = 1 AND client_id = ?
     ORDER BY id DESC
   `).all(clientId);
+}
+
+async function clientFileById(id) {
+  return await db.prepare(`
+    SELECT id, client_id AS clientId, name, url, original_name AS originalName, mime_type AS mimeType, size, path, notes, active
+    FROM client_files
+    WHERE id = ? AND active = 1
+  `).get(id);
 }
 
 async function canSeeClient(user, clientId) {
@@ -539,13 +615,50 @@ async function crudRoutes(req, res, url) {
     if (!user) return;
     if (!await canSeeClient(user, id)) return json(res, 403, { error: "لا تملك صلاحية لهذا العميل" });
     if (method === "GET") return json(res, 200, await clientFiles(id));
-    const body = await readBody(req);
     if (method === "POST") {
-      const result = await db.prepare("INSERT INTO client_files (client_id, name, url, notes) VALUES (?, ?, ?, ?)")
-        .run(id, body.name, body.url, body.notes || "");
+      const { fields, files } = await readMultipart(req);
+      const file = files.file;
+      if (!file || file.buffer.length === 0) return json(res, 400, { error: "יש לבחור קובץ להעלאה" });
+      if (!config.uploads.allowedTypes.includes(file.type)) return json(res, 400, { error: "סוג הקובץ אינו נתמך" });
+
+      const ext = extname(file.filename).toLowerCase();
+      const clientDir = resolve(config.uploads.dir, "clients", String(id));
+      mkdirSync(clientDir, { recursive: true });
+      const storedName = `${Date.now()}-${randomUUID()}${ext}`;
+      const target = resolve(clientDir, storedName);
+      writeFileSync(target, file.buffer);
+
+      const displayName = String(fields.name || file.filename).trim() || file.filename;
+      const result = await db.prepare("INSERT INTO client_files (client_id, name, url, original_name, mime_type, size, path, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, displayName, "", file.filename, file.type, file.buffer.length, target, fields.notes || "");
+      const downloadUrl = `/api/client-files/${result.lastInsertRowid}/download`;
+      await db.prepare("UPDATE client_files SET url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(downloadUrl, result.lastInsertRowid);
       await audit(user.id, "create", "client_files", result.lastInsertRowid);
-      return json(res, 201, { id: result.lastInsertRowid });
+      return json(res, 201, { id: result.lastInsertRowid, url: downloadUrl });
     }
+  }
+
+  if (resource === "client-files" && method === "GET" && id && parts[3] === "download") {
+    const user = await requirePermission(req, res, "clients_read");
+    if (!user) return;
+    const file = await clientFileById(id);
+    if (!file) return json(res, 404, { error: "הקובץ לא נמצא" });
+    if (!await canSeeClient(user, file.clientId)) return json(res, 403, { error: "אין הרשאה לקובץ זה" });
+    if (!file.path) {
+      res.writeHead(302, { Location: file.url });
+      res.end();
+      return;
+    }
+    if (!existsSync(file.path)) return json(res, 404, { error: "הקובץ לא נמצא באחסון" });
+    const buffer = readFileSync(file.path);
+    res.writeHead(200, {
+      "Content-Type": file.mimeType || "application/octet-stream",
+      "Content-Length": buffer.length,
+      "Content-Disposition": `inline; filename*=UTF-8''${contentDispositionName(file.originalName || file.name)}`,
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(buffer);
+    return;
   }
 
   if (resource === "client-files" && method === "DELETE" && id) {

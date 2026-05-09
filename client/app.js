@@ -139,11 +139,12 @@ const statusLabel = new Proxy({}, { get: (_, key) => tr(`status.${String(key)}`)
 const paymentLabel = new Proxy({}, { get: (_, key) => tr(`payment.${String(key)}`) });
 
 async function api(path, options = {}) {
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: isFormData ? (options.headers || {}) : { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: options.body ? (isFormData ? options.body : JSON.stringify(options.body)) : undefined,
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "حدث خطأ");
@@ -1691,8 +1692,8 @@ async function openClientProfile(id) {
           <div class="profile-section"><h4>היסטוריית ביקורים</h4>${appointmentTable(data.appointments || [], false)}</div>
           <div class="profile-section">
             <h4>קבצים ותמונות לקוח</h4>
-            ${(data.files || []).map((file) => `<div class="file-row"><a href="${file.url}" target="_blank" rel="noopener">${file.name}</a><span>${file.notes || ""}</span>${canWrite ? `<button class="btn danger" data-delete-file="${file.id}" data-client="${id}">מחיקה</button>` : ""}</div>`).join("") || `<p class="muted">אין קבצים</p>`}
-            ${canWrite ? `<form id="clientFileForm" class="inline-form"><input name="name" placeholder="שם הקובץ" required><input name="url" placeholder="קישור לתמונה או קובץ" required><input name="notes" placeholder="הערה"><button class="btn">הוספת קובץ</button></form>` : ""}
+            ${(data.files || []).map((file) => `<div class="file-row"><a href="${file.url}" target="_blank" rel="noopener">${file.name}</a><span>${file.notes || file.originalName || ""}</span><small>${file.size ? `${Math.round(file.size / 1024)}KB` : ""}</small>${canWrite ? `<button class="btn danger" data-delete-file="${file.id}" data-client="${id}">מחיקה</button>` : ""}</div>`).join("") || `<p class="muted">אין קבצים</p>`}
+            ${canWrite ? `<form id="clientFileForm" class="inline-form upload-form"><input name="name" placeholder="שם הקובץ"><input name="file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><input name="notes" placeholder="הערה"><button class="btn">העלאה</button></form><div class="muted upload-hint">JPG, PNG, WEBP, PDF · עד 10MB</div>` : ""}
           </div>
         </div>
       </div>
@@ -1702,7 +1703,7 @@ async function openClientProfile(id) {
   const fileForm = document.getElementById("clientFileForm");
   if (fileForm) fileForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await api(`/api/clients/${id}/files`, { method: "POST", body: Object.fromEntries(new FormData(fileForm)) });
+    await api(`/api/clients/${id}/files`, { method: "POST", body: new FormData(fileForm) });
     openClientProfile(id);
   });
   document.querySelectorAll("[data-delete-file]").forEach((button) => button.addEventListener("click", async () => {
