@@ -1,16 +1,95 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { config } from "./config.js";
 import { hashPassword } from "./security.js";
 
-mkdirSync(dirname(config.databasePath), { recursive: true });
-export const db = new DatabaseSync(config.databasePath);
-db.exec("PRAGMA foreign_keys = ON");
-db.exec("PRAGMA journal_mode = WAL");
+const isPostgres = Boolean(config.databaseUrl);
+const pgModule = isPostgres ? await import("pg") : null;
+const Pool = pgModule?.default?.Pool;
 
-export function initDatabase() {
-  db.exec(`
+function sqliteValue(value) {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  return value;
+}
+
+function pgSql(sql) {
+  let index = 0;
+  return sql
+    .replace(/\?/g, () => `$${++index}`)
+    .replace(/\bAS\s+([a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*)/g, 'AS "$1"');
+}
+
+function pgValues(values) {
+  return values.map((value) => {
+    if (typeof value === "boolean") return value ? 1 : 0;
+    return value;
+  });
+}
+
+class SqliteAdapter {
+  constructor() {
+    mkdirSync(dirname(config.databasePath), { recursive: true });
+    this.client = new DatabaseSync(config.databasePath);
+    this.client.exec("PRAGMA foreign_keys = ON");
+    this.client.exec("PRAGMA journal_mode = WAL");
+  }
+
+  prepare(sql) {
+    const stmt = this.client.prepare(sql);
+    return {
+      all: (...values) => stmt.all(...values.map(sqliteValue)),
+      get: (...values) => stmt.get(...values.map(sqliteValue)),
+      run: (...values) => stmt.run(...values.map(sqliteValue)),
+    };
+  }
+
+  exec(sql) {
+    return this.client.exec(sql);
+  }
+}
+
+class PostgresAdapter {
+  constructor() {
+    this.pool = new Pool({ connectionString: config.databaseUrl });
+  }
+
+  prepare(sql) {
+    return {
+      all: async (...values) => (await this.pool.query(pgSql(sql), pgValues(values))).rows,
+      get: async (...values) => (await this.pool.query(pgSql(sql), pgValues(values))).rows[0],
+      run: async (...values) => {
+        let text = pgSql(sql);
+        const wantsId = /^\s*INSERT\s+/i.test(text) && !/\bRETURNING\b/i.test(text);
+        if (wantsId) text += " RETURNING id";
+        const result = await this.pool.query(text, pgValues(values));
+        return {
+          changes: result.rowCount,
+          lastInsertRowid: result.rows[0]?.id,
+        };
+      },
+    };
+  }
+
+  async exec(sql) {
+    return this.pool.query(sql);
+  }
+}
+
+export const db = isPostgres ? new PostgresAdapter() : new SqliteAdapter();
+export const databaseEngine = isPostgres ? "postgresql" : "sqlite";
+
+export async function initDatabase() {
+  if (isPostgres) await initPostgres();
+  else await initSqlite();
+  await seedSettings();
+
+  const userCount = (await db.prepare("SELECT COUNT(*) AS count FROM users").get()).count;
+  if (Number(userCount) === 0) await seedDatabase();
+}
+
+async function initSqlite() {
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
@@ -100,18 +179,19 @@ export function initDatabase() {
     );
   `);
 
-  ensureColumn("clients", "active", "INTEGER NOT NULL DEFAULT 1");
-  ensureColumn("categories", "active", "INTEGER NOT NULL DEFAULT 1");
-  ensureColumn("appointments", "active", "INTEGER NOT NULL DEFAULT 1");
-  ensureColumn("appointments", "payment_status", "TEXT NOT NULL DEFAULT 'unpaid'");
-  ensureColumn("appointments", "paid_amount", "REAL NOT NULL DEFAULT 0");
-  seedSettings();
-
-  const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
-  if (userCount === 0) seedDatabase();
+  await ensureSqliteColumn("clients", "active", "INTEGER NOT NULL DEFAULT 1");
+  await ensureSqliteColumn("categories", "active", "INTEGER NOT NULL DEFAULT 1");
+  await ensureSqliteColumn("appointments", "active", "INTEGER NOT NULL DEFAULT 1");
+  await ensureSqliteColumn("appointments", "payment_status", "TEXT NOT NULL DEFAULT 'unpaid'");
+  await ensureSqliteColumn("appointments", "paid_amount", "REAL NOT NULL DEFAULT 0");
 }
 
-function seedSettings() {
+async function initPostgres() {
+  const schema = readFileSync(new URL("./postgres/schema.sql", import.meta.url), "utf8");
+  await db.exec(schema);
+}
+
+async function seedSettings() {
   const defaults = {
     clinicName: "CMS SUZAN",
     logoUrl: "/logo.svg",
@@ -119,41 +199,44 @@ function seedSettings() {
     workStart: "09:00",
     workEnd: "18:00",
     workDays: "[0,1,2,3,4,5]",
-    whatsappTemplate: "مرحبا {client}، نذكرك بموعدك في {clinic} بتاريخ {date} الساعة {time}.",
+    whatsappTemplate: "שלום {client}, תזכורת לתור שלך ב-{clinic} בתאריך {date} בשעה {time}.",
   };
-  const insert = db.prepare("INSERT OR IGNORE INTO clinic_settings (key, value) VALUES (?, ?)");
-  Object.entries(defaults).forEach(([key, value]) => insert.run(key, value));
+  const insert = db.prepare(`
+    INSERT INTO clinic_settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO NOTHING
+  `);
+  for (const [key, value] of Object.entries(defaults)) await insert.run(key, value);
 }
 
-function ensureColumn(table, column, definition) {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+async function ensureSqliteColumn(table, column, definition) {
+  const columns = (await db.prepare(`PRAGMA table_info(${table})`).all()).map((row) => row.name);
   if (!columns.includes(column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
 
-function seedDatabase() {
+async function seedDatabase() {
   const addUser = db.prepare(`
     INSERT INTO users (username, password_hash, name, title, role, workdays, service_ids)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  addUser.run("admin", hashPassword("ChangeMe123!"), "سوزان", "مديرة العيادة", "admin", "[]", "[]");
-  addUser.run("reception", hashPassword("ChangeMe123!"), "موظفة الاستقبال", "استقبال", "reception", "[]", "[]");
-  addUser.run("sara", hashPassword("ChangeMe123!"), "سارة", "معالجة", "therapist", "[0,1,2,3,4]", "[1,2,3]");
-  addUser.run("lina", hashPassword("ChangeMe123!"), "لينا", "معالجة", "therapist", "[1,3,4]", "[3,4,5]");
+  await addUser.run("admin", hashPassword("ChangeMe123!"), "סוזאן", "מנהלת הקליניקה", "admin", "[]", "[]");
+  await addUser.run("reception", hashPassword("ChangeMe123!"), "קבלה", "קבלה", "reception", "[]", "[]");
+  await addUser.run("sara", hashPassword("ChangeMe123!"), "סארה", "מטפלת", "therapist", "[0,1,2,3,4]", "[1,2,3]");
+  await addUser.run("lina", hashPassword("ChangeMe123!"), "לינה", "מטפלת", "therapist", "[1,3,4]", "[3,4,5]");
 
   const addCategory = db.prepare("INSERT INTO categories (name) VALUES (?)");
-  addCategory.run("الحواجب");
-  addCategory.run("التجميل");
-  addCategory.run("صبغ الشعر");
-  addCategory.run("المكياج الدائم");
+  await addCategory.run("גבות");
+  await addCategory.run("טיפוח");
+  await addCategory.run("צביעת שיער");
+  await addCategory.run("איפור קבוע");
 
   const addService = db.prepare("INSERT INTO services (name, category_id, duration, price) VALUES (?, ?, ?, ?)");
-  addService.run("تصميم حواجب", 1, 60, 180);
-  addService.run("صبغ حواجب", 1, 45, 150);
-  addService.run("تنظيف بشرة عميق", 2, 90, 320);
-  addService.run("مكياج دائم للشفاه", 4, 120, 600);
-  addService.run("صبغ شعر", 3, 120, 350);
+  await addService.run("עיצוב גבות", 1, 60, 180);
+  await addService.run("צביעת גבות", 1, 45, 150);
+  await addService.run("ניקוי עור עמוק", 2, 90, 320);
+  await addService.run("איפור קבוע לשפתיים", 4, 120, 600);
+  await addService.run("צביעת שיער", 3, 120, 350);
 }
 
 export function rowToUser(row) {
@@ -170,7 +253,7 @@ export function rowToUser(row) {
   };
 }
 
-export function audit(userId, action, entity, entityId, details = {}) {
-  db.prepare("INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?, ?, ?, ?, ?)")
+export async function audit(userId, action, entity, entityId, details = {}) {
+  await db.prepare("INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?, ?, ?, ?, ?)")
     .run(userId || null, action, entity, entityId || null, JSON.stringify(details));
 }

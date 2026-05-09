@@ -5,9 +5,9 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   title TEXT DEFAULT '',
   role TEXT NOT NULL CHECK (role IN ('admin','reception','therapist')),
-  workdays JSONB NOT NULL DEFAULT '[]'::jsonb,
-  service_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-  active BOOLEAN NOT NULL DEFAULT TRUE,
+  workdays TEXT NOT NULL DEFAULT '[]',
+  service_ids TEXT NOT NULL DEFAULT '[]',
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS categories (
   id BIGSERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -25,7 +26,7 @@ CREATE TABLE IF NOT EXISTS services (
   category_id BIGINT NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
   duration INTEGER NOT NULL CHECK (duration > 0),
   price NUMERIC(12,2) NOT NULL CHECK (price >= 0),
-  active BOOLEAN NOT NULL DEFAULT TRUE,
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -38,21 +39,40 @@ CREATE TABLE IF NOT EXISTS clients (
   email TEXT DEFAULT '',
   therapist_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
   notes TEXT DEFAULT '',
-  active BOOLEAN NOT NULL DEFAULT TRUE,
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS appointments (
   id BIGSERIAL PRIMARY KEY,
-  client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
+  client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   service_id BIGINT NOT NULL REFERENCES services(id) ON DELETE RESTRICT,
   therapist_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  date DATE NOT NULL,
-  time TIME NOT NULL,
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending','done','cancelled')),
+  payment_status TEXT NOT NULL DEFAULT 'unpaid',
+  paid_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
   notes TEXT DEFAULT '',
-  active BOOLEAN NOT NULL DEFAULT TRUE,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS clinic_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS client_files (
+  id BIGSERIAL PRIMARY KEY,
+  client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  notes TEXT DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -70,11 +90,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
   action TEXT NOT NULL,
   entity TEXT NOT NULL,
   entity_id BIGINT,
-  details JSONB DEFAULT '{}'::jsonb,
+  details TEXT DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
-CREATE INDEX IF NOT EXISTS idx_appointments_therapist_date ON appointments(therapist_id, date);
+CREATE INDEX IF NOT EXISTS idx_categories_active ON categories(active);
+CREATE INDEX IF NOT EXISTS idx_services_active ON services(active);
 CREATE INDEX IF NOT EXISTS idx_clients_active ON clients(active);
 CREATE INDEX IF NOT EXISTS idx_appointments_active ON appointments(active);
+CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
+CREATE INDEX IF NOT EXISTS idx_appointments_therapist_date ON appointments(therapist_id, date);

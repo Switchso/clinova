@@ -10,7 +10,7 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const sqlite = new DatabaseSync(config.databasePath);
+const sqlite = new DatabaseSync(config.databasePath, { readOnly: true });
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function main() {
@@ -26,6 +26,8 @@ async function main() {
     await copyServices(client);
     await copyClients(client);
     await copyAppointments(client);
+    await copySettings(client);
+    await copyClientFiles(client);
     await copyAudit(client);
     await resetSequences(client);
 
@@ -42,7 +44,7 @@ async function main() {
 }
 
 async function clearTables(client) {
-  await client.query("TRUNCATE audit_log, sessions, appointments, clients, services, categories, users RESTART IDENTITY CASCADE");
+  await client.query("TRUNCATE audit_log, sessions, client_files, clinic_settings, appointments, clients, services, categories, users RESTART IDENTITY CASCADE");
 }
 
 async function copyUsers(client) {
@@ -50,8 +52,8 @@ async function copyUsers(client) {
   for (const row of rows) {
     await client.query(
       `INSERT INTO users (id, username, password_hash, name, title, role, workdays, service_ids, active, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11)`,
-      [row.id, row.username, row.password_hash, row.name, row.title || "", row.role, row.workdays || "[]", row.service_ids || "[]", Boolean(row.active), row.created_at, row.updated_at]
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [row.id, row.username, row.password_hash, row.name, row.title || "", row.role, row.workdays || "[]", row.service_ids || "[]", Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -60,8 +62,8 @@ async function copyCategories(client) {
   const rows = sqlite.prepare("SELECT * FROM categories ORDER BY id").all();
   for (const row of rows) {
     await client.query(
-      "INSERT INTO categories (id, name, created_at, updated_at) VALUES ($1,$2,$3,$4)",
-      [row.id, row.name, row.created_at, row.updated_at]
+      "INSERT INTO categories (id, name, active, created_at, updated_at) VALUES ($1,$2,$3,$4,$5)",
+      [row.id, row.name, Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -72,7 +74,7 @@ async function copyServices(client) {
     await client.query(
       `INSERT INTO services (id, name, category_id, duration, price, active, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [row.id, row.name, row.category_id, row.duration, row.price, Boolean(row.active), row.created_at, row.updated_at]
+      [row.id, row.name, row.category_id, row.duration, row.price, Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -83,7 +85,7 @@ async function copyClients(client) {
     await client.query(
       `INSERT INTO clients (id, fname, lname, phone, email, therapist_id, notes, active, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [row.id, row.fname, row.lname, row.phone, row.email || "", row.therapist_id || null, row.notes || "", Boolean(row.active), row.created_at, row.updated_at]
+      [row.id, row.fname, row.lname, row.phone, row.email || "", row.therapist_id || null, row.notes || "", Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -92,9 +94,44 @@ async function copyAppointments(client) {
   const rows = sqlite.prepare("SELECT * FROM appointments ORDER BY id").all();
   for (const row of rows) {
     await client.query(
-      `INSERT INTO appointments (id, client_id, service_id, therapist_id, date, time, status, notes, active, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [row.id, row.client_id, row.service_id, row.therapist_id, row.date, row.time, row.status, row.notes || "", Boolean(row.active), row.created_at, row.updated_at]
+      `INSERT INTO appointments (id, client_id, service_id, therapist_id, date, time, status, payment_status, paid_amount, notes, active, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        row.id,
+        row.client_id,
+        row.service_id,
+        row.therapist_id,
+        row.date,
+        row.time,
+        row.status,
+        row.payment_status || "unpaid",
+        row.paid_amount || 0,
+        row.notes || "",
+        Number(row.active ?? 1),
+        row.created_at,
+        row.updated_at,
+      ]
+    );
+  }
+}
+
+async function copySettings(client) {
+  const rows = sqlite.prepare("SELECT * FROM clinic_settings ORDER BY key").all();
+  for (const row of rows) {
+    await client.query(
+      "INSERT INTO clinic_settings (key, value, updated_at) VALUES ($1,$2,$3)",
+      [row.key, row.value, row.updated_at]
+    );
+  }
+}
+
+async function copyClientFiles(client) {
+  const rows = sqlite.prepare("SELECT * FROM client_files ORDER BY id").all();
+  for (const row of rows) {
+    await client.query(
+      `INSERT INTO client_files (id, client_id, name, url, notes, active, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [row.id, row.client_id, row.name, row.url, row.notes || "", Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -104,14 +141,14 @@ async function copyAudit(client) {
   for (const row of rows) {
     await client.query(
       `INSERT INTO audit_log (id, user_id, action, entity, entity_id, details, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [row.id, row.user_id || null, row.action, row.entity, row.entity_id || null, row.details || "{}", row.created_at]
     );
   }
 }
 
 async function resetSequences(client) {
-  for (const table of ["users", "categories", "services", "clients", "appointments", "audit_log"]) {
+  for (const table of ["users", "categories", "services", "clients", "appointments", "client_files", "audit_log"]) {
     await client.query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE((SELECT MAX(id) FROM ${table}), 1), true)`);
   }
 }

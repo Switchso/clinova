@@ -8,6 +8,9 @@
 - Improved backup creation for SQLite using a consistent SQLite export.
 - Prepared backup flow for PostgreSQL using `pg_dump` when `DATABASE_URL` is active.
 - Added backup retention cleanup.
+- Added database adapter support for PostgreSQL through `DATABASE_URL`.
+- Added PostgreSQL schema and updated SQLite-to-PostgreSQL migration to include settings, client files, and payment fields.
+- Updated health check to show the active database engine.
 
 ## 1.2.0
 

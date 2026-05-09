@@ -1,13 +1,14 @@
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
-import { db, initDatabase, rowToUser, audit } from "./db.js";
+import { db, databaseEngine, initDatabase, rowToUser, audit } from "./db.js";
 import { config } from "./config.js";
+import { createBackup } from "./backup.js";
 import { createSessionToken, hashPassword, readSignedToken, verifyPassword } from "./security.js";
 
-initDatabase();
+await initDatabase();
 if (process.argv.includes("--init-db")) {
-  console.log(`Database ready: ${config.databasePath}`);
+  console.log(`Database ready: ${config.databaseUrl ? "PostgreSQL" : config.databasePath}`);
   process.exit(0);
 }
 
@@ -113,18 +114,18 @@ function clearSessionCookie(res) {
   res.setHeader("Set-Cookie", "clinic_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
 }
 
-function currentUser(req) {
+async function currentUser(req) {
   const token = parseCookies(req).clinic_session;
   const id = readSignedToken(token, config.sessionSecret);
   if (!id) return null;
   const now = Date.now();
-  const session = db.prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?").get(id, now);
+  const session = await db.prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > ?").get(id, now);
   if (!session) return null;
-  return rowToUser(db.prepare("SELECT * FROM users WHERE id = ? AND active = 1").get(session.user_id));
+  return rowToUser(await db.prepare("SELECT * FROM users WHERE id = ? AND active = 1").get(session.user_id));
 }
 
-function requireUser(req, res) {
-  const user = currentUser(req);
+async function requireUser(req, res) {
+  const user = await currentUser(req);
   if (!user) {
     json(res, 401, { error: "يجب تسجيل الدخول" });
     return null;
@@ -132,8 +133,8 @@ function requireUser(req, res) {
   return user;
 }
 
-function requirePermission(req, res, key) {
-  const user = requireUser(req, res);
+async function requirePermission(req, res, key) {
+  const user = await requireUser(req, res);
   if (!user) return null;
   if (!permissions[key]?.includes(user.role)) {
     json(res, 403, { error: "لا تملك صلاحية لهذه العملية" });
@@ -146,16 +147,16 @@ function parseJsonArray(value) {
   return JSON.stringify(Array.isArray(value) ? value : []);
 }
 
-function serviceMap() {
-  return new Map(db.prepare("SELECT id, duration FROM services").all().map((row) => [row.id, row]));
+async function serviceMap() {
+  return new Map((await db.prepare("SELECT id, duration FROM services").all()).map((row) => [row.id, row]));
 }
 
-function appointmentConflict({ id, date, time, serviceId, therapistId }) {
-  const service = db.prepare("SELECT duration FROM services WHERE id = ?").get(serviceId);
+async function appointmentConflict({ id, date, time, serviceId, therapistId }) {
+  const service = await db.prepare("SELECT duration FROM services WHERE id = ?").get(serviceId);
   if (!service) return null;
   const start = toMinutes(time);
   const end = start + service.duration;
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT a.*, s.duration, c.fname, c.lname
     FROM appointments a
     JOIN services s ON s.id = a.service_id
@@ -177,7 +178,7 @@ function toMinutes(time) {
   return hours * 60 + minutes;
 }
 
-function listAppointments(user) {
+async function listAppointments(user) {
   const base = `
     SELECT a.*, c.fname, c.lname, c.phone, s.name AS service_name, s.duration, s.price, u.name AS therapist_name
     FROM appointments a
@@ -186,8 +187,8 @@ function listAppointments(user) {
     JOIN users u ON u.id = a.therapist_id
   `;
   const rows = user.role === "therapist"
-    ? db.prepare(`${base} WHERE a.active = 1 AND a.therapist_id = ? ORDER BY a.date DESC, a.time DESC`).all(user.id)
-    : db.prepare(`${base} WHERE a.active = 1 ORDER BY a.date DESC, a.time DESC`).all();
+    ? await db.prepare(`${base} WHERE a.active = 1 AND a.therapist_id = ? ORDER BY a.date DESC, a.time DESC`).all(user.id)
+    : await db.prepare(`${base} WHERE a.active = 1 ORDER BY a.date DESC, a.time DESC`).all();
   return rows.map((row) => ({
     id: row.id,
     clientId: row.client_id,
@@ -208,10 +209,10 @@ function listAppointments(user) {
   }));
 }
 
-function listClients(user) {
+async function listClients(user) {
   const rows = user.role === "therapist"
-    ? db.prepare("SELECT * FROM clients WHERE active = 1 AND therapist_id = ? ORDER BY updated_at DESC").all(user.id)
-    : db.prepare("SELECT * FROM clients WHERE active = 1 ORDER BY updated_at DESC").all();
+    ? await db.prepare("SELECT * FROM clients WHERE active = 1 AND therapist_id = ? ORDER BY updated_at DESC").all(user.id)
+    : await db.prepare("SELECT * FROM clients WHERE active = 1 ORDER BY updated_at DESC").all();
   return rows.map((row) => ({
     id: row.id,
     fname: row.fname,
@@ -223,14 +224,14 @@ function listClients(user) {
   }));
 }
 
-function clinicSettings() {
-  const rows = db.prepare("SELECT key, value FROM clinic_settings ORDER BY key").all();
+async function clinicSettings() {
+  const rows = await db.prepare("SELECT key, value FROM clinic_settings ORDER BY key").all();
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 }
 
-function updateClinicSettings(values) {
+async function updateClinicSettings(values) {
   const allowed = ["clinicName", "logoUrl", "currency", "workStart", "workEnd", "workDays", "whatsappTemplate"];
-  const stmt = db.prepare(`
+  const stmt = await db.prepare(`
     INSERT INTO clinic_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `);
@@ -239,8 +240,8 @@ function updateClinicSettings(values) {
   }
 }
 
-function clientFiles(clientId) {
-  return db.prepare(`
+async function clientFiles(clientId) {
+  return await db.prepare(`
     SELECT id, client_id AS clientId, name, url, notes, created_at AS createdAt
     FROM client_files
     WHERE active = 1 AND client_id = ?
@@ -248,9 +249,9 @@ function clientFiles(clientId) {
   `).all(clientId);
 }
 
-function canSeeClient(user, clientId) {
+async function canSeeClient(user, clientId) {
   if (user.role !== "therapist") return true;
-  const row = db.prepare("SELECT id FROM clients WHERE id = ? AND active = 1 AND therapist_id = ?").get(clientId, user.id);
+  const row = await db.prepare("SELECT id FROM clients WHERE id = ? AND active = 1 AND therapist_id = ?").get(clientId, user.id);
   return Boolean(row);
 }
 
@@ -273,8 +274,10 @@ async function api(req, res, url) {
   const method = req.method;
 
   if (method === "GET" && url.pathname === "/api/health") {
+    const dbCheck = await db.prepare("SELECT 1 AS ok").get();
     const checks = {
-      database: Boolean(db.prepare("SELECT 1 AS ok").get()?.ok),
+      database: Boolean(dbCheck?.ok),
+      databaseEngine,
       time: new Date().toISOString(),
     };
     json(res, 200, { ok: checks.database, version: packageInfo.version, checks });
@@ -297,7 +300,7 @@ async function api(req, res, url) {
       json(res, 429, { error: "محاولات دخول كثيرة. حاول مرة أخرى بعد 15 دقيقة" });
       return;
     }
-    const row = db.prepare("SELECT * FROM users WHERE username = ? AND active = 1").get(body.username || "");
+    const row = await db.prepare("SELECT * FROM users WHERE username = ? AND active = 1").get(body.username || "");
     if (!row || !verifyPassword(body.password || "", row.password_hash)) {
       recordFailedLogin(req, body.username);
       json(res, 401, { error: "اسم المستخدم أو كلمة المرور غير صحيحة" });
@@ -307,9 +310,9 @@ async function api(req, res, url) {
     const token = createSessionToken(config.sessionSecret);
     const id = token.split(".")[0];
     const expiresAt = Date.now() + 1000 * 60 * 60 * 12;
-    db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").run(id, row.id, expiresAt);
+    await db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").run(id, row.id, expiresAt);
     setSessionCookie(res, token, expiresAt);
-    audit(row.id, "login", "session", null);
+    await audit(row.id, "login", "session", null);
     json(res, 200, { user: rowToUser(row) });
     return;
   }
@@ -317,42 +320,42 @@ async function api(req, res, url) {
   if (method === "POST" && url.pathname === "/api/logout") {
     const token = parseCookies(req).clinic_session;
     const id = readSignedToken(token, config.sessionSecret);
-    if (id) db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    if (id) await db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     clearSessionCookie(res);
     json(res, 200, { ok: true });
     return;
   }
 
   if (method === "POST" && url.pathname === "/api/account/password") {
-    const user = requireUser(req, res);
+    const user = await requireUser(req, res);
     if (!user) return;
     const body = await readBody(req);
     if (!body.newPassword || String(body.newPassword).length < 8) {
       json(res, 400, { error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
       return;
     }
-    const row = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+    const row = await db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
     if (!row || !verifyPassword(body.currentPassword || "", row.password_hash)) {
       json(res, 400, { error: "كلمة المرور الحالية غير صحيحة" });
       return;
     }
-    db.prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    await db.prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
       .run(hashPassword(body.newPassword), user.id);
-    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+    await db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
     clearSessionCookie(res);
-    audit(user.id, "change_password", "users", user.id);
+    await audit(user.id, "change_password", "users", user.id);
     json(res, 200, { ok: true });
     return;
   }
 
   if (method === "GET" && url.pathname === "/api/me") {
-    const user = currentUser(req);
+    const user = await currentUser(req);
     json(res, 200, { user });
     return;
   }
 
   if (method === "GET" && url.pathname === "/api/search") {
-    const user = requireUser(req, res);
+    const user = await requireUser(req, res);
     if (!user) return;
     const term = String(url.searchParams.get("q") || "").trim();
     if (term.length < 2) return json(res, 200, { clients: [], appointments: [], services: [] });
@@ -361,7 +364,7 @@ async function api(req, res, url) {
     const clientSql = user.role === "therapist"
       ? "SELECT c.*, u.name AS therapistName FROM clients c LEFT JOIN users u ON u.id = c.therapist_id WHERE c.active = 1 AND c.therapist_id = ? ORDER BY c.updated_at DESC LIMIT 80"
       : "SELECT c.*, u.name AS therapistName FROM clients c LEFT JOIN users u ON u.id = c.therapist_id WHERE c.active = 1 ORDER BY c.updated_at DESC LIMIT 120";
-    const clientRows = user.role === "therapist" ? db.prepare(clientSql).all(user.id) : db.prepare(clientSql).all();
+    const clientRows = user.role === "therapist" ? await db.prepare(clientSql).all(user.id) : await db.prepare(clientSql).all();
     const clients = clientRows
       .map((row) => {
         const name = `${row.fname} ${row.lname}`;
@@ -382,61 +385,61 @@ async function api(req, res, url) {
       WHERE a.active = 1 AND (c.fname LIKE ? OR c.lname LIKE ? OR c.phone LIKE ? OR REPLACE(c.phone, '-', '') LIKE ? OR s.name LIKE ? OR u.name LIKE ? OR a.date LIKE ? OR a.status LIKE ? OR a.payment_status LIKE ?)
     `;
     const apptRows = user.role === "therapist"
-      ? db.prepare(`${apptBase} AND a.therapist_id = ? ORDER BY a.date DESC, a.time DESC LIMIT 10`).all(like, like, like, digitTerm, like, like, like, like, like, user.id)
-      : db.prepare(`${apptBase} ORDER BY a.date DESC, a.time DESC LIMIT 10`).all(like, like, like, digitTerm, like, like, like, like, like);
+      ? await db.prepare(`${apptBase} AND a.therapist_id = ? ORDER BY a.date DESC, a.time DESC LIMIT 10`).all(like, like, like, digitTerm, like, like, like, like, like, user.id)
+      : await db.prepare(`${apptBase} ORDER BY a.date DESC, a.time DESC LIMIT 10`).all(like, like, like, digitTerm, like, like, like, like, like);
     const serviceRows = user.role === "admin" || user.role === "reception"
-      ? db.prepare("SELECT s.id, s.name, s.duration, s.price, c.name AS categoryName FROM services s JOIN categories c ON c.id = s.category_id WHERE s.active = 1 AND (s.name LIKE ? OR c.name LIKE ?) ORDER BY s.name LIMIT 8").all(like, like)
+      ? await db.prepare("SELECT s.id, s.name, s.duration, s.price, c.name AS categoryName FROM services s JOIN categories c ON c.id = s.category_id WHERE s.active = 1 AND (s.name LIKE ? OR c.name LIKE ?) ORDER BY s.name LIMIT 8").all(like, like)
       : [];
     json(res, 200, { clients, appointments: apptRows, services: serviceRows });
     return;
   }
 
   if (method === "GET" && url.pathname === "/api/settings") {
-    const user = requireUser(req, res);
+    const user = await requireUser(req, res);
     if (!user) return;
-    json(res, 200, { settings: clinicSettings() });
+    json(res, 200, { settings: await clinicSettings() });
     return;
   }
 
   if (method === "PUT" && url.pathname === "/api/settings") {
-    const user = requirePermission(req, res, "settings_write");
+    const user = await requirePermission(req, res, "settings_write");
     if (!user) return;
     const body = await readBody(req);
-    updateClinicSettings(body);
-    audit(user.id, "update", "settings", null);
-    json(res, 200, { settings: clinicSettings() });
+    await updateClinicSettings(body);
+    await audit(user.id, "update", "settings", null);
+    json(res, 200, { settings: await clinicSettings() });
     return;
   }
 
   if (method === "GET" && url.pathname === "/api/system/export") {
-    const user = requirePermission(req, res, "settings_write");
+    const user = await requirePermission(req, res, "settings_write");
     if (!user) return;
-    db.exec("PRAGMA wal_checkpoint(FULL)");
-    const backup = readFileSync(config.databasePath);
+    const exportBackup = createBackup({ reason: "download-export" });
+    const backup = readFileSync(exportBackup.target);
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
     res.writeHead(200, {
-      "Content-Type": "application/vnd.sqlite3",
-      "Content-Disposition": `attachment; filename="cms-suzan-${stamp}.sqlite"`,
+      "Content-Type": config.databaseUrl ? "application/octet-stream" : "application/vnd.sqlite3",
+      "Content-Disposition": `attachment; filename="cms-suzan-${stamp}.${config.databaseUrl ? "dump" : "sqlite"}"`,
       "Content-Length": backup.length,
       "X-Content-Type-Options": "nosniff",
     });
     res.end(backup);
-    audit(user.id, "export", "system", null);
+    await audit(user.id, "export", "system", null);
     return;
   }
 
   if (method === "GET" && url.pathname === "/api/bootstrap") {
-    const user = requireUser(req, res);
+    const user = await requireUser(req, res);
     if (!user) return;
     json(res, 200, {
       user,
-      users: db.prepare("SELECT * FROM users ORDER BY id").all().map(rowToUser),
-      categories: db.prepare("SELECT * FROM categories WHERE active = 1 ORDER BY name").all(),
-      services: db.prepare("SELECT id, name, category_id AS categoryId, duration, price, active FROM services ORDER BY name").all(),
-      clients: listClients(user),
-      appointments: listAppointments(user),
-      settings: clinicSettings(),
-      audits: user.role === "admin" ? listAudit() : [],
+      users: (await db.prepare("SELECT * FROM users ORDER BY id").all()).map(rowToUser),
+      categories: await db.prepare("SELECT * FROM categories WHERE active = 1 ORDER BY name").all(),
+      services: await db.prepare("SELECT id, name, category_id AS categoryId, duration, price, active FROM services ORDER BY name").all(),
+      clients: await listClients(user),
+      appointments: await listAppointments(user),
+      settings: await clinicSettings(),
+      audits: user.role === "admin" ? await listAudit() : [],
     });
     return;
   }
@@ -451,14 +454,14 @@ async function crudRoutes(req, res, url) {
   const id = parts[2] ? Number(parts[2]) : null;
 
   if (resource === "users") {
-    const user = requirePermission(req, res, "users");
+    const user = await requirePermission(req, res, "users");
     if (!user) return;
-    if (method === "GET") return json(res, 200, db.prepare("SELECT * FROM users ORDER BY id").all().map(rowToUser));
+    if (method === "GET") return json(res, 200, (await db.prepare("SELECT * FROM users ORDER BY id").all()).map(rowToUser));
     const body = await readBody(req);
     if (method === "POST") {
-      const result = db.prepare("INSERT INTO users (username, password_hash, name, title, role, workdays, service_ids, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      const result = await db.prepare("INSERT INTO users (username, password_hash, name, title, role, workdays, service_ids, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .run(body.username, hashPassword(body.password), body.name, body.title || "", body.role, parseJsonArray(body.workdays), parseJsonArray(body.serviceIds), body.active === false ? 0 : 1);
-      audit(user.id, "create", "users", result.lastInsertRowid);
+      await audit(user.id, "create", "users", result.lastInsertRowid);
       return json(res, 201, { id: result.lastInsertRowid });
     }
     if (method === "PUT" && id) {
@@ -466,148 +469,148 @@ async function crudRoutes(req, res, url) {
       const values = body.password
         ? [body.username, body.name, body.title || "", body.role, parseJsonArray(body.workdays), parseJsonArray(body.serviceIds), body.active === false ? 0 : 1, hashPassword(body.password), id]
         : [body.username, body.name, body.title || "", body.role, parseJsonArray(body.workdays), parseJsonArray(body.serviceIds), body.active === false ? 0 : 1, id];
-      db.prepare(`UPDATE users SET username = ?, name = ?, title = ?, role = ?, workdays = ?, service_ids = ?, active = ?, updated_at = CURRENT_TIMESTAMP${passwordPart} WHERE id = ?`).run(...values);
-      audit(user.id, "update", "users", id);
+      await db.prepare(`UPDATE users SET username = ?, name = ?, title = ?, role = ?, workdays = ?, service_ids = ?, active = ?, updated_at = CURRENT_TIMESTAMP${passwordPart} WHERE id = ?`).run(...values);
+      await audit(user.id, "update", "users", id);
       return json(res, 200, { ok: true });
     }
     if (method === "DELETE" && id) {
-      db.prepare("UPDATE users SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-      audit(user.id, "deactivate", "users", id);
+      await db.prepare("UPDATE users SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      await audit(user.id, "deactivate", "users", id);
       return json(res, 200, { ok: true });
     }
   }
 
   if (resource === "categories") {
-    const user = requirePermission(req, res, "categories");
+    const user = await requirePermission(req, res, "categories");
     if (!user) return;
-    if (method === "GET") return json(res, 200, db.prepare("SELECT * FROM categories WHERE active = 1 ORDER BY name").all());
+    if (method === "GET") return json(res, 200, await db.prepare("SELECT * FROM categories WHERE active = 1 ORDER BY name").all());
     const body = await readBody(req);
     if (method === "POST") {
-      const result = db.prepare("INSERT INTO categories (name) VALUES (?)").run(body.name);
-      audit(user.id, "create", "categories", result.lastInsertRowid);
+      const result = await db.prepare("INSERT INTO categories (name) VALUES (?)").run(body.name);
+      await audit(user.id, "create", "categories", result.lastInsertRowid);
       return json(res, 201, { id: result.lastInsertRowid });
     }
     if (method === "PUT" && id) {
-      db.prepare("UPDATE categories SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.name, id);
-      audit(user.id, "update", "categories", id);
+      await db.prepare("UPDATE categories SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.name, id);
+      await audit(user.id, "update", "categories", id);
       return json(res, 200, { ok: true });
     }
     if (method === "DELETE" && id) {
-      db.prepare("UPDATE categories SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-      db.prepare("UPDATE services SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE category_id = ?").run(id);
-      audit(user.id, "archive", "categories", id);
+      await db.prepare("UPDATE categories SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      await db.prepare("UPDATE services SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE category_id = ?").run(id);
+      await audit(user.id, "archive", "categories", id);
       return json(res, 200, { ok: true });
     }
   }
 
   if (resource === "services") {
-    const user = requirePermission(req, res, "services");
+    const user = await requirePermission(req, res, "services");
     if (!user) return;
-    if (method === "GET") return json(res, 200, db.prepare("SELECT id, name, category_id AS categoryId, duration, price, active FROM services ORDER BY name").all());
+    if (method === "GET") return json(res, 200, await db.prepare("SELECT id, name, category_id AS categoryId, duration, price, active FROM services ORDER BY name").all());
     const body = await readBody(req);
     if (method === "POST") {
-      const result = db.prepare("INSERT INTO services (name, category_id, duration, price, active) VALUES (?, ?, ?, ?, ?)").run(body.name, body.categoryId, body.duration, body.price, body.active === false ? 0 : 1);
-      audit(user.id, "create", "services", result.lastInsertRowid);
+      const result = await db.prepare("INSERT INTO services (name, category_id, duration, price, active) VALUES (?, ?, ?, ?, ?)").run(body.name, body.categoryId, body.duration, body.price, body.active === false ? 0 : 1);
+      await audit(user.id, "create", "services", result.lastInsertRowid);
       return json(res, 201, { id: result.lastInsertRowid });
     }
     if (method === "PUT" && id) {
-      db.prepare("UPDATE services SET name = ?, category_id = ?, duration = ?, price = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.name, body.categoryId, body.duration, body.price, body.active === false ? 0 : 1, id);
-      audit(user.id, "update", "services", id);
+      await db.prepare("UPDATE services SET name = ?, category_id = ?, duration = ?, price = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.name, body.categoryId, body.duration, body.price, body.active === false ? 0 : 1, id);
+      await audit(user.id, "update", "services", id);
       return json(res, 200, { ok: true });
     }
     if (method === "DELETE" && id) {
-      db.prepare("UPDATE services SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-      audit(user.id, "deactivate", "services", id);
+      await db.prepare("UPDATE services SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      await audit(user.id, "deactivate", "services", id);
       return json(res, 200, { ok: true });
     }
   }
 
   if (resource === "clients" && id && parts[3] === "history" && method === "GET") {
-    const user = requirePermission(req, res, "clients_read");
+    const user = await requirePermission(req, res, "clients_read");
     if (!user) return;
-    if (!canSeeClient(user, id)) return json(res, 403, { error: "لا تملك صلاحية لهذا العميل" });
-    const client = listClients(user).find((item) => item.id === id);
-    const appointments = listAppointments(user).filter((item) => item.clientId === id);
-    return json(res, 200, { client, appointments, files: clientFiles(id) });
+    if (!await canSeeClient(user, id)) return json(res, 403, { error: "لا تملك صلاحية لهذا العميل" });
+    const client = (await listClients(user)).find((item) => item.id === id);
+    const appointments = (await listAppointments(user)).filter((item) => item.clientId === id);
+    return json(res, 200, { client, appointments, files: await clientFiles(id) });
   }
 
   if (resource === "clients" && id && parts[3] === "files") {
-    const user = requirePermission(req, res, method === "GET" ? "clients_read" : "clients_write");
+    const user = await requirePermission(req, res, method === "GET" ? "clients_read" : "clients_write");
     if (!user) return;
-    if (!canSeeClient(user, id)) return json(res, 403, { error: "لا تملك صلاحية لهذا العميل" });
-    if (method === "GET") return json(res, 200, clientFiles(id));
+    if (!await canSeeClient(user, id)) return json(res, 403, { error: "لا تملك صلاحية لهذا العميل" });
+    if (method === "GET") return json(res, 200, await clientFiles(id));
     const body = await readBody(req);
     if (method === "POST") {
-      const result = db.prepare("INSERT INTO client_files (client_id, name, url, notes) VALUES (?, ?, ?, ?)")
+      const result = await db.prepare("INSERT INTO client_files (client_id, name, url, notes) VALUES (?, ?, ?, ?)")
         .run(id, body.name, body.url, body.notes || "");
-      audit(user.id, "create", "client_files", result.lastInsertRowid);
+      await audit(user.id, "create", "client_files", result.lastInsertRowid);
       return json(res, 201, { id: result.lastInsertRowid });
     }
   }
 
   if (resource === "client-files" && method === "DELETE" && id) {
-    const user = requirePermission(req, res, "clients_write");
+    const user = await requirePermission(req, res, "clients_write");
     if (!user) return;
-    db.prepare("UPDATE client_files SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-    audit(user.id, "archive", "client_files", id);
+    await db.prepare("UPDATE client_files SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+    await audit(user.id, "archive", "client_files", id);
     return json(res, 200, { ok: true });
   }
 
   if (resource === "clients") {
-    const user = requirePermission(req, res, method === "GET" ? "clients_read" : "clients_write");
+    const user = await requirePermission(req, res, method === "GET" ? "clients_read" : "clients_write");
     if (!user) return;
-    if (method === "GET") return json(res, 200, listClients(user));
+    if (method === "GET") return json(res, 200, await listClients(user));
     const body = await readBody(req);
     if (method === "POST") {
-      const result = db.prepare("INSERT INTO clients (fname, lname, phone, email, therapist_id, notes) VALUES (?, ?, ?, ?, ?, ?)").run(body.fname, body.lname, body.phone, body.email || "", body.therapistId || null, body.notes || "");
-      audit(user.id, "create", "clients", result.lastInsertRowid);
+      const result = await db.prepare("INSERT INTO clients (fname, lname, phone, email, therapist_id, notes) VALUES (?, ?, ?, ?, ?, ?)").run(body.fname, body.lname, body.phone, body.email || "", body.therapistId || null, body.notes || "");
+      await audit(user.id, "create", "clients", result.lastInsertRowid);
       return json(res, 201, { id: result.lastInsertRowid });
     }
     if (method === "PUT" && id) {
-      db.prepare("UPDATE clients SET fname = ?, lname = ?, phone = ?, email = ?, therapist_id = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.fname, body.lname, body.phone, body.email || "", body.therapistId || null, body.notes || "", id);
-      audit(user.id, "update", "clients", id);
+      await db.prepare("UPDATE clients SET fname = ?, lname = ?, phone = ?, email = ?, therapist_id = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.fname, body.lname, body.phone, body.email || "", body.therapistId || null, body.notes || "", id);
+      await audit(user.id, "update", "clients", id);
       return json(res, 200, { ok: true });
     }
     if (method === "DELETE" && id) {
-      db.prepare("UPDATE clients SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-      db.prepare("UPDATE appointments SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE client_id = ?").run(id);
-      audit(user.id, "archive", "clients", id);
+      await db.prepare("UPDATE clients SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      await db.prepare("UPDATE appointments SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE client_id = ?").run(id);
+      await audit(user.id, "archive", "clients", id);
       return json(res, 200, { ok: true });
     }
   }
 
   if (resource === "appointments") {
     const key = method === "DELETE" ? "appointments_delete" : method === "GET" ? "appointments_read" : "appointments_write";
-    const user = requirePermission(req, res, key);
+    const user = await requirePermission(req, res, key);
     if (!user) return;
-    if (method === "GET") return json(res, 200, listAppointments(user));
+    if (method === "GET") return json(res, 200, await listAppointments(user));
     if (method === "DELETE" && id) {
-      db.prepare("UPDATE appointments SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-      audit(user.id, "archive", "appointments", id);
+      await db.prepare("UPDATE appointments SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      await audit(user.id, "archive", "appointments", id);
       return json(res, 200, { ok: true });
     }
     const body = await readBody(req);
     const therapistId = user.role === "therapist" ? user.id : body.therapistId;
-    const conflict = appointmentConflict({ id, date: body.date, time: body.time, serviceId: body.serviceId, therapistId });
+    const conflict = await appointmentConflict({ id, date: body.date, time: body.time, serviceId: body.serviceId, therapistId });
     if (conflict) return json(res, 409, { error: conflict });
     const paymentStatus = ["paid", "unpaid", "deposit"].includes(body.paymentStatus) ? body.paymentStatus : "unpaid";
     const paidAmount = Number(body.paidAmount || 0);
     if (method === "POST") {
-      const result = db.prepare("INSERT INTO appointments (client_id, service_id, therapist_id, date, time, status, payment_status, paid_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(body.clientId, body.serviceId, therapistId, body.date, body.time, body.status || "pending", paymentStatus, paidAmount, body.notes || "");
-      audit(user.id, "create", "appointments", result.lastInsertRowid);
+      const result = await db.prepare("INSERT INTO appointments (client_id, service_id, therapist_id, date, time, status, payment_status, paid_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(body.clientId, body.serviceId, therapistId, body.date, body.time, body.status || "pending", paymentStatus, paidAmount, body.notes || "");
+      await audit(user.id, "create", "appointments", result.lastInsertRowid);
       return json(res, 201, { id: result.lastInsertRowid });
     }
     if (method === "PUT" && id) {
-      db.prepare("UPDATE appointments SET client_id = ?, service_id = ?, therapist_id = ?, date = ?, time = ?, status = ?, payment_status = ?, paid_amount = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.clientId, body.serviceId, therapistId, body.date, body.time, body.status || "pending", paymentStatus, paidAmount, body.notes || "", id);
-      audit(user.id, "update", "appointments", id);
+      await db.prepare("UPDATE appointments SET client_id = ?, service_id = ?, therapist_id = ?, date = ?, time = ?, status = ?, payment_status = ?, paid_amount = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.clientId, body.serviceId, therapistId, body.date, body.time, body.status || "pending", paymentStatus, paidAmount, body.notes || "", id);
+      await audit(user.id, "update", "appointments", id);
       return json(res, 200, { ok: true });
     }
   }
 
   if (resource === "reports") {
-    const user = requirePermission(req, res, "reports");
+    const user = await requirePermission(req, res, "reports");
     if (!user) return;
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT a.status, a.date, s.price, s.name AS service_name, u.name AS therapist_name
       FROM appointments a
       JOIN services s ON s.id = a.service_id
@@ -627,16 +630,16 @@ async function crudRoutes(req, res, url) {
   }
 
   if (resource === "audit") {
-    const user = requirePermission(req, res, "audit");
+    const user = await requirePermission(req, res, "audit");
     if (!user) return;
-    return json(res, 200, listAudit());
+    return json(res, 200, await listAudit());
   }
 
   json(res, 404, { error: "المسار غير موجود" });
 }
 
-function listAudit() {
-  const rows = db.prepare(`
+async function listAudit() {
+  const rows = await db.prepare(`
     SELECT a.id, a.action, a.entity, a.entity_id AS entityId, a.details, a.created_at AS createdAt, u.name AS userName
     FROM audit_log a
     LEFT JOIN users u ON u.id = a.user_id
