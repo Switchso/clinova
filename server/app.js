@@ -6,6 +6,7 @@ import { db, databaseEngine, initDatabase, rowToUser, audit } from "./db.js";
 import { config } from "./config.js";
 import { createBackup } from "./backup.js";
 import { createSessionToken, hashPassword, readSignedToken, verifyPassword } from "./security.js";
+import { renderReminderMessage, sendWhatsAppText, whatsappFallbackUrl } from "./whatsapp.js";
 
 await initDatabase();
 if (process.argv.includes("--init-db")) {
@@ -696,6 +697,22 @@ async function crudRoutes(req, res, url) {
     const key = method === "DELETE" ? "appointments_delete" : method === "GET" ? "appointments_read" : "appointments_write";
     const user = await requirePermission(req, res, key);
     if (!user) return;
+    if (method === "POST" && id && parts[3] === "whatsapp") {
+      const appointment = (await listAppointments(user)).find((item) => item.id === id);
+      if (!appointment) return json(res, 404, { error: "התור לא נמצא" });
+      const settings = await clinicSettings();
+      const message = renderReminderMessage(appointment, settings);
+      const result = await sendWhatsAppText({ to: appointment.clientPhone, message });
+      await audit(user.id, result.ok ? "whatsapp_sent" : "whatsapp_fallback", "appointments", id, {
+        configured: result.configured !== false,
+        dryRun: Boolean(result.dryRun),
+        messageId: result.messageId || "",
+      });
+      return json(res, 200, {
+        ...result,
+        fallbackUrl: result.fallbackUrl || whatsappFallbackUrl(appointment.clientPhone, message),
+      });
+    }
     if (method === "GET") return json(res, 200, await listAppointments(user));
     if (method === "DELETE" && id) {
       await db.prepare("UPDATE appointments SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);

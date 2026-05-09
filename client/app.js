@@ -1258,13 +1258,25 @@ function cleanPhone(phone) {
   return String(phone || "").replace(/[^\d+]/g, "");
 }
 
-function sendReminder(id, channel) {
+async function sendReminder(id, channel) {
   const appointment = state.data.appointments.find((item) => item.id === id);
   if (!appointment) return;
-  const phone = cleanPhone(appointment.clientPhone);
-  const text = encodeURIComponent(reminderText(appointment, channel));
-  const url = `https://wa.me/${phone.replace("+", "")}?text=${text}`;
-  window.open(url, "_blank", "noopener");
+  try {
+    const result = await api(`/api/appointments/${id}/whatsapp`, { method: "POST", body: {} });
+    if (result.ok) {
+      alert(result.dryRun ? "WhatsApp dry-run בוצע בהצלחה" : "הודעת WhatsApp נשלחה בהצלחה");
+      return;
+    }
+    if (result.fallbackUrl) {
+      window.open(result.fallbackUrl, "_blank", "noopener");
+      return;
+    }
+  } catch (error) {
+    const phone = cleanPhone(appointment.clientPhone);
+    const text = encodeURIComponent(reminderText(appointment, channel));
+    const url = `https://wa.me/${phone.replace("+", "")}?text=${text}`;
+    window.open(url, "_blank", "noopener");
+  }
 }
 
 function printReceiptLegacy(id) {

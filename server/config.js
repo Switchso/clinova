@@ -37,4 +37,12 @@ export const config = {
       .map((item) => item.trim())
       .filter(Boolean),
   },
+  whatsapp: {
+    enabled: String(process.env.WHATSAPP_ENABLED || "false").toLowerCase() === "true",
+    dryRun: String(process.env.WHATSAPP_DRY_RUN || "false").toLowerCase() === "true",
+    graphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v21.0",
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
+    defaultCountryCode: process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "972",
+  },
 };

@@ -14,6 +14,9 @@
 - Added professional client file uploads with type and size validation.
 - Added protected download links for uploaded client files.
 - Added upload storage settings and excluded uploaded files from Git.
+- Added WhatsApp Cloud API integration for appointment reminders.
+- Added safe WhatsApp fallback links when the API is not configured.
+- Added environment-based WhatsApp credentials so tokens are never stored in the database or UI.
 
 ## 1.2.0
 
