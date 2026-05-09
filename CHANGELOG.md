@@ -19,6 +19,8 @@
 - Added environment-based WhatsApp credentials so tokens are never stored in the database or UI.
 - Added GitHub Actions CI/CD workflow for automatic production deployments.
 - Hardened the server update script with deployment locking, forced fast sync to `origin/main`, backup before deploy, PM2 start-or-reload, and health check retries.
+- Updated appointment conflict detection to block overlapping appointments in the same service category.
+- Added a large centered conflict message in the appointment form.
 
 ## 1.2.0
 

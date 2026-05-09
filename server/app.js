@@ -221,22 +221,22 @@ async function serviceMap() {
 }
 
 async function appointmentConflict({ id, date, time, serviceId, therapistId }) {
-  const service = await db.prepare("SELECT duration FROM services WHERE id = ?").get(serviceId);
+  const service = await db.prepare("SELECT duration, category_id, name FROM services WHERE id = ?").get(serviceId);
   if (!service) return null;
   const start = toMinutes(time);
   const end = start + service.duration;
   const rows = await db.prepare(`
-    SELECT a.*, s.duration, c.fname, c.lname
+    SELECT a.*, s.duration, s.name AS service_name, c.fname, c.lname
     FROM appointments a
     JOIN services s ON s.id = a.service_id
     JOIN clients c ON c.id = a.client_id
-    WHERE a.date = ? AND a.status != 'cancelled' AND a.active = 1 AND a.therapist_id = ? AND a.id != ?
-  `).all(date, therapistId, id || 0);
+    WHERE a.date = ? AND a.status != 'cancelled' AND a.active = 1 AND s.category_id = ? AND a.id != ?
+  `).all(date, service.category_id, id || 0);
   for (const row of rows) {
     const otherStart = toMinutes(row.time);
     const otherEnd = otherStart + row.duration;
     if (!(end <= otherStart || start >= otherEnd)) {
-      return `يوجد موعد متعارض مع ${row.fname} ${row.lname} في ${row.time}`;
+      return `لا يمكن حجز موعد في نفس القسم بهذا الوقت. يوجد موعد ${row.service_name} مع ${row.fname} ${row.lname} الساعة ${row.time}`;
     }
   }
   return null;

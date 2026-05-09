@@ -1075,6 +1075,17 @@ function closeModal() {
   document.getElementById("modalRoot").innerHTML = "";
 }
 
+function showCenterError(message) {
+  const existing = document.querySelector(".center-error-overlay");
+  if (existing) existing.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "center-error-overlay";
+  overlay.innerHTML = `<div class="center-error-card"><strong>${message}</strong><button class="btn" type="button">סגירה</button></div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector("button").addEventListener("click", () => overlay.remove());
+  window.setTimeout(() => overlay.remove(), 7000);
+}
+
 function formFieldsLegacy(resource, row) {
   if (resource === "clients") return html`
     ${field("fname", "الاسم الأول", row.fname)}
@@ -1650,6 +1661,7 @@ function openForm(resource, id = null, defaults = {}) {
       renderApp();
     } catch (err) {
       document.getElementById("formError").textContent = err.message;
+      showCenterError(err.message);
     }
   });
 }
