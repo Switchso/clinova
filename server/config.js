@@ -18,6 +18,15 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   host: process.env.HOST || "0.0.0.0",
   databasePath: resolve(process.env.DATABASE_PATH || "./data/clinic.sqlite"),
+  databaseUrl: process.env.DATABASE_URL || "",
   sessionSecret: process.env.SESSION_SECRET || "dev-only-change-me",
   cookieSecure: String(process.env.COOKIE_SECURE || "false").toLowerCase() === "true",
+  backup: {
+    enabled: String(process.env.BACKUP_ENABLED || "true").toLowerCase() !== "false",
+    dir: resolve(process.env.BACKUP_DIR || "./backups"),
+    retention: Math.max(1, Number(process.env.BACKUP_RETENTION || 14)),
+    intervalHours: Math.max(1, Number(process.env.BACKUP_INTERVAL_HOURS || 24)),
+    time: process.env.BACKUP_TIME || "02:00",
+    runOnStart: String(process.env.BACKUP_RUN_ON_START || "false").toLowerCase() === "true",
+  },
 };
