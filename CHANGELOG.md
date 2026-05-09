@@ -17,6 +17,8 @@
 - Added WhatsApp Cloud API integration for appointment reminders.
 - Added safe WhatsApp fallback links when the API is not configured.
 - Added environment-based WhatsApp credentials so tokens are never stored in the database or UI.
+- Added GitHub Actions CI/CD workflow for automatic production deployments.
+- Hardened the server update script with deployment locking, forced fast sync to `origin/main`, backup before deploy, PM2 start-or-reload, and health check retries.
 
 ## 1.2.0
 
