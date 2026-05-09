@@ -236,7 +236,12 @@ async function appointmentConflict({ id, date, time, serviceId, therapistId }) {
     const otherStart = toMinutes(row.time);
     const otherEnd = otherStart + row.duration;
     if (!(end <= otherStart || start >= otherEnd)) {
-      return `لا يمكن حجز موعد في نفس القسم بهذا الوقت. يوجد موعد ${row.service_name} مع ${row.fname} ${row.lname} الساعة ${row.time}`;
+      return {
+        code: "appointment_category_conflict",
+        serviceName: row.service_name,
+        clientName: `${row.fname} ${row.lname}`,
+        time: row.time,
+      };
     }
   }
   return null;
@@ -722,7 +727,7 @@ async function crudRoutes(req, res, url) {
     const body = await readBody(req);
     const therapistId = user.role === "therapist" ? user.id : body.therapistId;
     const conflict = await appointmentConflict({ id, date: body.date, time: body.time, serviceId: body.serviceId, therapistId });
-    if (conflict) return json(res, 409, { error: conflict });
+    if (conflict) return json(res, 409, { error: "appointment_category_conflict", details: conflict });
     const paymentStatus = ["paid", "unpaid", "deposit"].includes(body.paymentStatus) ? body.paymentStatus : "unpaid";
     const paidAmount = Number(body.paidAmount || 0);
     if (method === "POST") {

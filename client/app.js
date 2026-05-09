@@ -147,7 +147,12 @@ async function api(path, options = {}) {
     body: options.body ? (isFormData ? options.body : JSON.stringify(options.body)) : undefined,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "حدث خطأ");
+  if (!response.ok) {
+    const error = new Error(data.error || "حدث خطأ");
+    error.code = data.error || "";
+    error.details = data.details || {};
+    throw error;
+  }
   return data;
 }
 
@@ -1086,6 +1091,17 @@ function showCenterError(message) {
   window.setTimeout(() => overlay.remove(), 7000);
 }
 
+function localizedError(err) {
+  if (err.code === "appointment_category_conflict") {
+    const details = err.details || {};
+    if (state.lang === "he") {
+      return `לא ניתן לקבוע תור באותה קטגוריה בשעה זו. קיים כבר תור ${details.serviceName || ""} עם ${details.clientName || ""} בשעה ${details.time || ""}`;
+    }
+    return `لا يمكن حجز موعد في نفس القسم بهذا الوقت. يوجد موعد ${details.serviceName || ""} مع ${details.clientName || ""} الساعة ${details.time || ""}`;
+  }
+  return err.message;
+}
+
 function formFieldsLegacy(resource, row) {
   if (resource === "clients") return html`
     ${field("fname", "الاسم الأول", row.fname)}
@@ -1660,8 +1676,9 @@ function openForm(resource, id = null, defaults = {}) {
       await loadData();
       renderApp();
     } catch (err) {
-      document.getElementById("formError").textContent = err.message;
-      showCenterError(err.message);
+      const message = localizedError(err);
+      document.getElementById("formError").textContent = message;
+      showCenterError(message);
     }
   });
 }
