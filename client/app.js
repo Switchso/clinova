@@ -1364,18 +1364,20 @@ function renderQuickSearchLive() {
 }
 
 function appointmentTable(rows, actions) {
+  const heads = [tr("table.date"), tr("table.time"), tr("table.client"), tr("table.service"), tr("table.therapist"), tr("table.price"), tr("table.payment"), tr("table.status")];
+  const actionLabel = state.lang === "he" ? "פעולות" : "إجراءات";
   return html`
-    <div class="table-wrap">
+    <div class="table-wrap responsive-table appointment-table">
       <table>
-        <thead><tr><th>${tr("table.date")}</th><th>${tr("table.time")}</th><th>${tr("table.client")}</th><th>${tr("table.service")}</th><th>${tr("table.therapist")}</th><th>${tr("table.price")}</th><th>${tr("table.payment")}</th><th>${tr("table.status")}</th>${actions ? "<th></th>" : ""}</tr></thead>
+        <thead><tr>${heads.map((head) => `<th>${head}</th>`).join("")}${actions ? "<th></th>" : ""}</tr></thead>
         <tbody>
           ${rows.length ? rows.map((a) => html`
             <tr>
-              <td>${a.date}</td><td>${a.time}</td><td>${a.clientName}</td><td>${a.serviceName}</td><td>${a.therapistName}</td>
-              <td>${currency()}${Number(a.price || 0).toLocaleString()}</td>
-              <td><span class="pill ${a.paymentStatus || "unpaid"}">${paymentLabel[a.paymentStatus || "unpaid"]}</span></td>
-              <td><span class="pill ${a.status}">${statusLabel[a.status]}</span></td>
-              ${actions ? `<td class="actions"><button class="btn secondary" data-receipt="${a.id}">${tr("receipt")}</button><button class="btn secondary" data-whatsapp="${a.id}">WhatsApp</button><button class="btn secondary" data-edit="appointments" data-id="${a.id}">${tr("edit")}</button>${state.user.role === "admin" ? `<button class="btn danger" data-delete="appointments" data-id="${a.id}">${tr("delete")}</button>` : ""}</td>` : ""}
+              <td data-label="${escapeAttr(heads[0])}">${a.date}</td><td data-label="${escapeAttr(heads[1])}">${a.time}</td><td data-label="${escapeAttr(heads[2])}">${a.clientName}</td><td data-label="${escapeAttr(heads[3])}">${a.serviceName}</td><td data-label="${escapeAttr(heads[4])}">${a.therapistName}</td>
+              <td data-label="${escapeAttr(heads[5])}">${currency()}${Number(a.price || 0).toLocaleString()}</td>
+              <td data-label="${escapeAttr(heads[6])}"><span class="pill ${a.paymentStatus || "unpaid"}">${paymentLabel[a.paymentStatus || "unpaid"]}</span></td>
+              <td data-label="${escapeAttr(heads[7])}"><span class="pill ${a.status}">${statusLabel[a.status]}</span></td>
+              ${actions ? `<td class="actions" data-label="${escapeAttr(actionLabel)}"><button class="btn secondary" data-receipt="${a.id}">${tr("receipt")}</button><button class="btn secondary" data-whatsapp="${a.id}">WhatsApp</button><button class="btn secondary" data-edit="appointments" data-id="${a.id}">${tr("edit")}</button>${state.user.role === "admin" ? `<button class="btn danger" data-delete="appointments" data-id="${a.id}">${tr("delete")}</button>` : ""}</td>` : ""}
             </tr>`).join("") : `<tr><td colspan="${actions ? 9 : 8}" class="muted">${tr("noData")}</td></tr>`}
         </tbody>
       </table>
@@ -1553,12 +1555,13 @@ function calendarDay(day, view) {
 }
 
 function simpleTable(resource, heads, rows, mapRow) {
+  const actionLabel = state.lang === "he" ? "פעולות" : "إجراءات";
   return html`
-    <div class="table-wrap">
+    <div class="table-wrap responsive-table resource-${resource}">
       <table>
         <thead><tr>${heads.map((h) => `<th>${h}</th>`).join("")}<th></th></tr></thead>
         <tbody>
-          ${rows.map((row) => `<tr>${mapRow(row).map((cell) => `<td>${cell}</td>`).join("")}<td class="actions"><button class="btn secondary" data-edit="${resource}" data-id="${row.id}">עריכה</button><button class="btn danger" data-delete="${resource}" data-id="${row.id}">מחיקה</button></td></tr>`).join("") || `<tr><td colspan="${heads.length + 1}" class="muted">אין נתונים</td></tr>`}
+          ${rows.map((row) => `<tr>${mapRow(row).map((cell, index) => `<td data-label="${escapeAttr(heads[index] || "")}">${cell}</td>`).join("")}<td class="actions" data-label="${escapeAttr(actionLabel)}"><button class="btn secondary" data-edit="${resource}" data-id="${row.id}">עריכה</button><button class="btn danger" data-delete="${resource}" data-id="${row.id}">מחיקה</button></td></tr>`).join("") || `<tr><td colspan="${heads.length + 1}" class="muted">אין נתונים</td></tr>`}
         </tbody>
       </table>
     </div>
