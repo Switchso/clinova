@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileS
 import { basename, extname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { db, databaseEngine, initDatabase, rowToUser, audit } from "./db.js";
 import { config } from "./config.js";
 import { createBackup } from "./backup.js";
@@ -393,19 +394,40 @@ async function createSignedConsentClientFile({ signatureId, templateId, clientId
   if (!clientId) return null;
   const template = await consentTemplateById(templateId);
   const client = await db.prepare("SELECT fname, lname FROM clients WHERE id = ?").get(clientId);
-  if (!template || !client) return null;
+  if (!template || !client || !template.path || !existsSync(template.path)) return null;
 
   const clientDir = resolve(config.uploads.dir, "clients", String(clientId), "consents");
   mkdirSync(clientDir, { recursive: true });
-  const fileName = `signed-consent-${signatureId}.html`;
+  const fileName = `signed-consent-${signatureId}.pdf`;
   const target = resolve(clientDir, fileName);
-  const signedAt = new Date().toLocaleString("he-IL");
-  const markup = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${template.title}</title><style>body{font-family:Arial,sans-serif;padding:28px;color:#102220}.page{max-width:760px;margin:auto;border:1px solid #d8e6e1;border-radius:14px;padding:28px}.row{display:flex;justify-content:space-between;border-bottom:1px solid #eef3f1;padding:10px 0}img.signature{max-width:420px;border:1px solid #d8e6e1;border-radius:10px;background:white;padding:10px}a{color:#2d6a4f}</style></head><body><div class="page"><h1>טופס חתום</h1><div class="row"><span>טופס</span><strong>${template.title}</strong></div><div class="row"><span>לקוח</span><strong>${client.fname} ${client.lname}</strong></div><div class="row"><span>חותם</span><strong>${signerName}</strong></div><div class="row"><span>תאריך חתימה</span><strong>${signedAt}</strong></div><div class="row"><span>מספר תור</span><strong>${appointmentId || "-"}</strong></div><p><a href="${template.url}">פתיחת קובץ PDF המקורי</a></p><h2>חתימה</h2><img class="signature" src="${signatureData}" alt="signature"></div></body></html>`;
-  writeFileSync(target, markup);
+  const signedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
+
+  const pdf = await PDFDocument.load(readFileSync(template.path));
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const page = pdf.addPage();
+  const { width, height } = page.getSize();
+  page.drawText("SIGNED LEGAL CONSENT", { x: 48, y: height - 70, size: 20, font, color: rgb(0.18, 0.42, 0.31) });
+  page.drawText(`Form: ${template.title}`, { x: 48, y: height - 110, size: 12, font });
+  page.drawText(`Client: ${client.fname} ${client.lname}`, { x: 48, y: height - 132, size: 12, font });
+  page.drawText(`Signer: ${signerName}`, { x: 48, y: height - 154, size: 12, font });
+  page.drawText(`Appointment: ${appointmentId || "-"}`, { x: 48, y: height - 176, size: 12, font });
+  page.drawText(`Signed at: ${signedAt}`, { x: 48, y: height - 198, size: 12, font });
+  page.drawRectangle({ x: 48, y: height - 385, width: width - 96, height: 145, borderColor: rgb(0.18, 0.42, 0.31), borderWidth: 1 });
+  page.drawText("Signature stamp", { x: 60, y: height - 260, size: 11, font, color: rgb(0.42, 0.55, 0.48) });
+
+  const signatureBytes = Buffer.from(String(signatureData).split(",")[1] || "", "base64");
+  if (signatureBytes.length) {
+    const image = await pdf.embedPng(signatureBytes);
+    const scaled = image.scaleToFit(width - 130, 105);
+    page.drawImage(image, { x: 65, y: height - 370, width: scaled.width, height: scaled.height });
+  }
+
+  const stampedBytes = await pdf.save();
+  writeFileSync(target, stampedBytes);
 
   const displayName = `Signed - ${template.title}`;
   const result = await db.prepare("INSERT INTO client_files (client_id, name, url, original_name, mime_type, size, path, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(clientId, displayName, "", fileName, "text/html", Buffer.byteLength(markup), target, "Signed legal consent");
+    .run(clientId, displayName, "", fileName, "application/pdf", stampedBytes.length, target, "Signed legal consent");
   const downloadUrl = `/api/client-files/${result.lastInsertRowid}/download`;
   await db.prepare("UPDATE client_files SET url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(downloadUrl, result.lastInsertRowid);
   return result.lastInsertRowid;

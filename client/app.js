@@ -1019,8 +1019,15 @@ function bindPageActions() {
   document.querySelectorAll("[data-new]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.new)));
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.edit, Number(button.dataset.id))));
   document.querySelectorAll("[data-filter]").forEach((input) => input.addEventListener("input", () => {
-    state.filters[input.dataset.filter] = input.value;
+    const filterName = input.dataset.filter;
+    const cursor = input.selectionStart;
+    state.filters[filterName] = input.value;
     renderApp();
+    const next = document.querySelector(`[data-filter="${filterName}"]`);
+    if (next && next.tagName === "INPUT") {
+      next.focus();
+      next.setSelectionRange(cursor, cursor);
+    }
   }));
   document.querySelectorAll("[data-export]").forEach((button) => button.addEventListener("click", () => exportCsv(button.dataset.export)));
   document.querySelectorAll("[data-report-tab]").forEach((button) => button.addEventListener("click", () => {

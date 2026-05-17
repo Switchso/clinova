@@ -18,8 +18,9 @@
     "pm2:save": "npx pm2 save"
   },
   "dependencies": {
-    "pm2": "^7.0.1",
-    "pg": "^8.13.1"
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.13.1",
+    "pm2": "^7.0.1"
   },
   "engines": {
     "node": ">=22.5.0"
