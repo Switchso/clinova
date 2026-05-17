@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { config } from "./config.js";
 import { hashPassword } from "./security.js";
@@ -75,6 +75,29 @@ class PostgresAdapter {
     return this.pool.query(sql);
   }
 }
+
+function timestamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function applyPendingSqliteRestore() {
+  if (isPostgres) return;
+  const pending = resolve(config.backup.dir, "pending-restore.sqlite");
+  if (!existsSync(pending)) return;
+
+  mkdirSync(dirname(config.databasePath), { recursive: true });
+  mkdirSync(config.backup.dir, { recursive: true });
+  if (existsSync(config.databasePath)) {
+    copyFileSync(config.databasePath, resolve(config.backup.dir, `before-pending-restore-${timestamp()}.sqlite`));
+  }
+  rmSync(`${config.databasePath}-wal`, { force: true });
+  rmSync(`${config.databasePath}-shm`, { force: true });
+  copyFileSync(pending, config.databasePath);
+  rmSync(pending, { force: true });
+  rmSync(resolve(config.backup.dir, "pending-restore.json"), { force: true });
+}
+
+applyPendingSqliteRestore();
 
 export const db = isPostgres ? new PostgresAdapter() : new SqliteAdapter();
 export const databaseEngine = isPostgres ? "postgresql" : "sqlite";

@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { db, databaseEngine, initDatabase, rowToUser, audit } from "./db.js";
 import { config } from "./config.js";
 import { createBackup } from "./backup.js";
@@ -66,6 +67,20 @@ function safeFileName(name) {
 
 function contentDispositionName(name) {
   return encodeURIComponent(safeFileName(name)).replace(/['()]/g, escape);
+}
+
+function assertValidSqliteBackup(path) {
+  const sqlite = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = sqlite.prepare("PRAGMA integrity_check").get();
+    if (row.integrity_check !== "ok") {
+      const error = new Error("SQLite backup integrity check failed.");
+      error.status = 400;
+      throw error;
+    }
+  } finally {
+    sqlite.close();
+  }
 }
 
 async function readRawBody(req, maxBytes = config.uploads.maxBytes) {
@@ -610,7 +625,6 @@ async function api(req, res, url) {
     const user = await requirePermission(req, res, "settings_write");
     if (!user) return;
     if (config.databaseUrl) return json(res, 400, { error: "Restore upload is available for SQLite. Use pg_restore for PostgreSQL backups." });
-    const safety = createBackup({ reason: "before-restore" });
     const { files } = await readMultipart(req);
     const file = files.backup;
     if (!file || file.buffer.length === 0) return json(res, 400, { error: "Choose a backup file to restore." });
@@ -618,7 +632,18 @@ async function api(req, res, url) {
     mkdirSync(restoreDir, { recursive: true });
     const source = resolve(restoreDir, `${Date.now()}-${safeFileName(file.filename)}`);
     writeFileSync(source, file.buffer);
-    copyFileSync(source, config.databasePath);
+    assertValidSqliteBackup(source);
+    const safety = createBackup({ reason: "before-restore" });
+    const pending = resolve(config.backup.dir, "pending-restore.sqlite");
+    copyFileSync(source, pending);
+    writeFileSync(resolve(config.backup.dir, "pending-restore.json"), JSON.stringify({
+      uploadedName: file.filename,
+      source,
+      requestedBy: user.id,
+      safetyBackup: safety.target,
+      createdAt: new Date().toISOString(),
+    }, null, 2));
+    await audit(user.id, "restore_scheduled", "system", null, { source: file.filename, safetyBackup: safety.target });
     json(res, 200, { ok: true, safetyBackup: safety.target, restarting: true });
     setTimeout(() => process.exit(0), 500);
     return;
