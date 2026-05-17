@@ -979,6 +979,7 @@ function bindPageActions() {
   }));
   document.querySelectorAll("[data-receipt]").forEach((button) => button.addEventListener("click", () => printReceipt(Number(button.dataset.receipt))));
   document.querySelectorAll("[data-whatsapp]").forEach((button) => button.addEventListener("click", () => sendReminder(Number(button.dataset.whatsapp), "whatsapp")));
+  document.querySelectorAll("[data-sign-appointment]").forEach((button) => button.addEventListener("click", () => openAppointmentConsent(Number(button.dataset.signAppointment))));
   const logoFile = document.getElementById("logoFile");
   if (logoFile) logoFile.addEventListener("change", () => readLogoFile(logoFile));
   const clinicSettingsForm = document.getElementById("clinicSettingsForm");
@@ -1147,20 +1148,21 @@ function openConsentUpload() {
   });
 }
 
-function openConsentSignature(id) {
+function openConsentSignature(id, defaults = {}) {
   const he = state.lang === "he";
   const template = (state.data.consentTemplates || []).find((item) => item.id === id);
   showModal(he ? "חתימה על טופס" : "توقيع الإقرار", html`
     <div class="field full"><iframe class="pdf-preview" src="${template?.url || ""}"></iframe></div>
-    ${select("clientId", he ? "לקוח" : "العميل", clientOptions(), "")}
-    ${field("signerName", he ? "שם החותם" : "اسم الموقّع")}
+    ${select("clientId", he ? "לקוח" : "العميل", clientOptions(), defaults.clientId || "")}
+    ${field("signerName", he ? "שם החותם" : "اسم الموقّع", defaults.signerName || "")}
+    <input type="hidden" name="appointmentId" value="${escapeAttr(defaults.appointmentId || "")}">
     <div class="field full"><label>${he ? "חתימה" : "التوقيع"}</label><canvas id="signaturePad" class="signature-pad"></canvas><button class="btn secondary" type="button" id="clearSignature">${he ? "ניקוי" : "مسح"}</button></div>
   `, async (event) => {
     event.preventDefault();
     try {
       const canvas = document.getElementById("signaturePad");
       const form = Object.fromEntries(new FormData(event.currentTarget));
-      await api(`/api/consents/${id}/sign`, { method: "POST", body: { ...form, clientId: Number(form.clientId), signatureData: canvas.toDataURL("image/png") } });
+      await api(`/api/consents/${id}/sign`, { method: "POST", body: { ...form, clientId: Number(form.clientId), appointmentId: numberOrNull(form.appointmentId), signatureData: canvas.toDataURL("image/png") } });
       closeModal();
       await loadData();
       renderApp();
@@ -1169,6 +1171,22 @@ function openConsentSignature(id) {
     }
   });
   initSignaturePad();
+}
+
+function templatesForAppointment(appointment) {
+  const service = state.data.services.find((item) => item.id === appointment?.serviceId);
+  if (!service) return [];
+  return (state.data.consentTemplates || []).filter((template) => Number(template.categoryId) === Number(service.categoryId));
+}
+
+function openAppointmentConsent(id) {
+  const appointment = state.data.appointments.find((item) => item.id === id);
+  const templates = templatesForAppointment(appointment);
+  if (!appointment || !templates.length) {
+    alert(state.lang === "he" ? "אין טופס משפטי לקטגוריה הזו" : "لا يوجد إقرار قانوني لهذا القسم");
+    return;
+  }
+  openConsentSignature(templates[0].id, { clientId: appointment.clientId, appointmentId: appointment.id, signerName: appointment.clientName });
 }
 
 function initSignaturePad() {
@@ -1248,6 +1266,11 @@ function showCenterError(message) {
 }
 
 function localizedError(err) {
+  if (err.code === "consent_required") {
+    const names = (err.details?.missing || []).map((item) => item.title).join(", ");
+    if (state.lang === "he") return `לא ניתן להעביר את התור לבוצע לפני חתימה על הטופס המשפטי: ${names}`;
+    return `لا يمكن تحويل الموعد إلى تم قبل توقيع الإقرار القانوني: ${names}`;
+  }
   if (err.code === "appointment_category_conflict") {
     const details = err.details || {};
     if (state.lang === "he") {
@@ -1533,7 +1556,7 @@ function appointmentTable(rows, actions) {
               <td data-label="${escapeAttr(heads[5])}">${currency()}${Number(a.price || 0).toLocaleString()}</td>
               <td data-label="${escapeAttr(heads[6])}"><span class="pill ${a.paymentStatus || "unpaid"}">${paymentLabel[a.paymentStatus || "unpaid"]}</span></td>
               <td data-label="${escapeAttr(heads[7])}"><span class="pill ${a.status}">${statusLabel[a.status]}</span></td>
-              ${actions ? `<td class="actions" data-label="${escapeAttr(actionLabel)}"><button class="btn secondary" data-receipt="${a.id}">${tr("receipt")}</button><button class="btn secondary" data-whatsapp="${a.id}">WhatsApp</button><button class="btn secondary" data-edit="appointments" data-id="${a.id}">${tr("edit")}</button>${state.user.role === "admin" ? `<button class="btn danger" data-delete="appointments" data-id="${a.id}">${tr("delete")}</button>` : ""}</td>` : ""}
+              ${actions ? `<td class="actions" data-label="${escapeAttr(actionLabel)}"><button class="btn secondary" data-sign-appointment="${a.id}">${state.lang === "he" ? "טופס" : "إقرار"}</button><button class="btn secondary" data-receipt="${a.id}">${tr("receipt")}</button><button class="btn secondary" data-whatsapp="${a.id}">WhatsApp</button><button class="btn secondary" data-edit="appointments" data-id="${a.id}">${tr("edit")}</button>${state.user.role === "admin" ? `<button class="btn danger" data-delete="appointments" data-id="${a.id}">${tr("delete")}</button>` : ""}</td>` : ""}
             </tr>`).join("") : `<tr><td colspan="${actions ? 9 : 8}" class="muted">${tr("noData")}</td></tr>`}
         </tbody>
       </table>

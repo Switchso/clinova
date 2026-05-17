@@ -367,6 +367,50 @@ async function consentSignatures() {
   `).all();
 }
 
+async function missingLegalConsents({ clientId, appointmentId, serviceId }) {
+  const service = await db.prepare("SELECT category_id FROM services WHERE id = ?").get(serviceId);
+  if (!service?.category_id) return [];
+  const templates = await db.prepare(`
+    SELECT id, title
+    FROM consent_templates
+    WHERE active = 1 AND category_id = ?
+    ORDER BY id
+  `).all(service.category_id);
+  const missing = [];
+  for (const template of templates) {
+    const signature = await db.prepare(`
+      SELECT id
+      FROM consent_signatures
+      WHERE template_id = ? AND (client_id = ? OR appointment_id = ?)
+      LIMIT 1
+    `).get(template.id, clientId || 0, appointmentId || 0);
+    if (!signature) missing.push(template);
+  }
+  return missing;
+}
+
+async function createSignedConsentClientFile({ signatureId, templateId, clientId, appointmentId, signerName, signatureData }) {
+  if (!clientId) return null;
+  const template = await consentTemplateById(templateId);
+  const client = await db.prepare("SELECT fname, lname FROM clients WHERE id = ?").get(clientId);
+  if (!template || !client) return null;
+
+  const clientDir = resolve(config.uploads.dir, "clients", String(clientId), "consents");
+  mkdirSync(clientDir, { recursive: true });
+  const fileName = `signed-consent-${signatureId}.html`;
+  const target = resolve(clientDir, fileName);
+  const signedAt = new Date().toLocaleString("he-IL");
+  const markup = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${template.title}</title><style>body{font-family:Arial,sans-serif;padding:28px;color:#102220}.page{max-width:760px;margin:auto;border:1px solid #d8e6e1;border-radius:14px;padding:28px}.row{display:flex;justify-content:space-between;border-bottom:1px solid #eef3f1;padding:10px 0}img.signature{max-width:420px;border:1px solid #d8e6e1;border-radius:10px;background:white;padding:10px}a{color:#2d6a4f}</style></head><body><div class="page"><h1>טופס חתום</h1><div class="row"><span>טופס</span><strong>${template.title}</strong></div><div class="row"><span>לקוח</span><strong>${client.fname} ${client.lname}</strong></div><div class="row"><span>חותם</span><strong>${signerName}</strong></div><div class="row"><span>תאריך חתימה</span><strong>${signedAt}</strong></div><div class="row"><span>מספר תור</span><strong>${appointmentId || "-"}</strong></div><p><a href="${template.url}">פתיחת קובץ PDF המקורי</a></p><h2>חתימה</h2><img class="signature" src="${signatureData}" alt="signature"></div></body></html>`;
+  writeFileSync(target, markup);
+
+  const displayName = `Signed - ${template.title}`;
+  const result = await db.prepare("INSERT INTO client_files (client_id, name, url, original_name, mime_type, size, path, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(clientId, displayName, "", fileName, "text/html", Buffer.byteLength(markup), target, "Signed legal consent");
+  const downloadUrl = `/api/client-files/${result.lastInsertRowid}/download`;
+  await db.prepare("UPDATE client_files SET url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(downloadUrl, result.lastInsertRowid);
+  return result.lastInsertRowid;
+}
+
 async function feedbackRequests() {
   return await db.prepare(`
     SELECT f.id, f.appointment_id AS appointmentId, f.token, f.rating, f.comment, f.status,
@@ -871,6 +915,12 @@ async function crudRoutes(req, res, url) {
     const therapistId = user.role === "therapist" ? user.id : body.therapistId;
     const conflict = await appointmentConflict({ id, date: body.date, time: body.time, serviceId: body.serviceId, therapistId });
     if (conflict) return json(res, 409, { error: "appointment_category_conflict", details: conflict });
+    if ((body.status || "pending") === "done") {
+      const missingConsents = await missingLegalConsents({ clientId: body.clientId, appointmentId: id, serviceId: body.serviceId });
+      if (missingConsents.length) {
+        return json(res, 409, { error: "consent_required", details: { missing: missingConsents } });
+      }
+    }
     const paymentStatus = ["paid", "unpaid", "deposit"].includes(body.paymentStatus) ? body.paymentStatus : "unpaid";
     const paidAmount = Number(body.paidAmount || 0);
     if (method === "POST") {
@@ -893,8 +943,16 @@ async function crudRoutes(req, res, url) {
       if (!body.signatureData || !String(body.signatureData).startsWith("data:image/")) return json(res, 400, { error: "Signature is required." });
       const result = await db.prepare("INSERT INTO consent_signatures (template_id, client_id, appointment_id, signer_name, signature_data) VALUES (?, ?, ?, ?, ?)")
         .run(id, body.clientId || null, body.appointmentId || null, String(body.signerName || ""), body.signatureData);
-      await audit(user.id, "sign", "consent_templates", id, { signatureId: result.lastInsertRowid });
-      return json(res, 201, { id: result.lastInsertRowid });
+      const fileId = await createSignedConsentClientFile({
+        signatureId: result.lastInsertRowid,
+        templateId: id,
+        clientId: body.clientId || null,
+        appointmentId: body.appointmentId || null,
+        signerName: String(body.signerName || ""),
+        signatureData: body.signatureData,
+      });
+      await audit(user.id, "sign", "consent_templates", id, { signatureId: result.lastInsertRowid, clientFileId: fileId });
+      return json(res, 201, { id: result.lastInsertRowid, clientFileId: fileId });
     }
     if (method === "GET" && id && parts[3] === "download") {
       const file = await consentTemplateById(id);
