@@ -1,7 +1,7 @@
 const state = {
   user: null,
   page: "dashboard",
-  data: { users: [], categories: [], services: [], clients: [], appointments: [], audits: [], settings: {} },
+  data: { users: [], categories: [], services: [], clients: [], appointments: [], consentTemplates: [], consentSignatures: [], feedbackRequests: [], giftCards: [], audits: [], settings: {} },
   filters: { appointments: "", appointmentStatus: "all", clients: "" },
   calendarView: "week",
   calendarDate: new Date().toISOString().slice(0, 10),
@@ -11,7 +11,7 @@ const state = {
   reportTab: "overview",
 };
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 
 const labels = {
   calendar: "التقويم",
@@ -27,9 +27,9 @@ const labels = {
 };
 
 const navByRole = {
-  admin: ["dashboard", "calendar", "appointments", "clients", "categories", "services", "users", "reports", "audit", "settings"],
-  reception: ["dashboard", "calendar", "appointments", "clients", "settings"],
-  therapist: ["dashboard", "calendar", "appointments", "clients", "settings"],
+  admin: ["dashboard", "calendar", "appointments", "clients", "consents", "feedback", "gifts", "categories", "services", "users", "reports", "audit", "settings"],
+  reception: ["dashboard", "calendar", "appointments", "clients", "consents", "feedback", "gifts", "settings"],
+  therapist: ["dashboard", "calendar", "appointments", "clients", "consents", "settings"],
 };
 
 const i18n = {
@@ -132,7 +132,11 @@ function tr(key) {
 }
 
 function pageLabel(page) {
-  return tr(`labels.${page}`);
+  const extra = state.lang === "he"
+    ? { consents: "טפסים משפטיים", feedback: "משוב לקוחות", gifts: "מתנות" }
+    : { consents: "الإقرارات القانونية", feedback: "آراء العملاء", gifts: "الهدايا" };
+  const label = tr(`labels.${page}`);
+  return label === `labels.${page}` ? (extra[page] || page) : label;
 }
 
 const statusLabel = new Proxy({}, { get: (_, key) => tr(`status.${String(key)}`) });
@@ -265,6 +269,10 @@ function renderAppLegacy() {
 }
 
 function pageSubtitle() {
+  const extra = state.lang === "he"
+    ? { consents: "ניהול קבצי PDF וחתימות לקוחות", feedback: "שליחת בקשת משוב לאחר טיפול", gifts: "כרטיסי מתנה ושליחה ב-WhatsApp" }
+    : { consents: "رفع ملفات PDF وتوقيع العملاء عليها", feedback: "إرسال طلب تقييم بعد الجلسة", gifts: "كروت هدايا قابلة للإرسال عبر WhatsApp" };
+  if (extra[state.page]) return extra[state.page];
   return tr(`subtitles.${state.page}`);
   const subtitles = {
     dashboard: "نظرة سريعة على يوم العمل والأداء",
@@ -290,6 +298,9 @@ function topAction() {
 function topActionI18n() {
   if (state.page === "appointments") return `<button class="btn" data-new="appointments">${tr("newAppointment")}</button>`;
   if (state.page === "clients" && state.user.role !== "therapist") return `<button class="btn" data-new="clients">${tr("newClient")}</button>`;
+  if (state.page === "consents" && state.user.role !== "therapist") return `<button class="btn" data-new-consent>${state.lang === "he" ? "העלאת PDF" : "رفع PDF"}</button>`;
+  if (state.page === "feedback") return `<button class="btn" data-new-feedback>${state.lang === "he" ? "שליחת משוב" : "إرسال تقييم"}</button>`;
+  if (state.page === "gifts") return `<button class="btn" data-new-gift>${state.lang === "he" ? "כרטיס מתנה" : "كرت هدية"}</button>`;
   if (["users", "categories", "services"].includes(state.page)) return `<button class="btn" data-new="${state.page}">${tr("add")}</button>`;
   return "";
 }
@@ -383,6 +394,9 @@ function renderPage() {
   if (state.page === "calendar") return renderCalendarHe();
   if (state.page === "appointments") return renderAppointmentsHe();
   if (state.page === "clients") return renderClientsHe();
+  if (state.page === "consents") return renderConsents();
+  if (state.page === "feedback") return renderFeedback();
+  if (state.page === "gifts") return renderGifts();
   if (state.page === "categories") return renderCategoriesHe();
   if (state.page === "services") return renderServicesHe();
   if (state.page === "users") return renderUsersHe();
@@ -978,6 +992,29 @@ function bindPageActions() {
     state.data.settings = result.settings;
     renderApp();
   });
+  const restoreForm = document.getElementById("restoreForm");
+  if (restoreForm) restoreForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!confirm(state.lang === "he" ? "לשחזר את הגיבוי שנבחר?" : "هل تريد استرجاع النسخة المختارة؟")) return;
+    const result = await api("/api/system/restore", { method: "POST", body: new FormData(restoreForm) });
+    alert(result.safetyBackup ? `Safety backup: ${result.safetyBackup}` : "Restore completed");
+    location.reload();
+  });
+  document.querySelectorAll("[data-new-consent]").forEach((button) => button.addEventListener("click", openConsentUpload));
+  document.querySelectorAll("[data-sign-consent]").forEach((button) => button.addEventListener("click", () => openConsentSignature(Number(button.dataset.signConsent))));
+  document.querySelectorAll("[data-delete-consent]").forEach((button) => button.addEventListener("click", async () => {
+    if (!confirm("Delete this consent PDF?")) return;
+    await api(`/api/consents/${button.dataset.deleteConsent}`, { method: "DELETE" });
+    await loadData();
+    renderApp();
+  }));
+  document.querySelectorAll("[data-new-feedback]").forEach((button) => button.addEventListener("click", openFeedbackRequest));
+  document.querySelectorAll("[data-new-gift]").forEach((button) => button.addEventListener("click", openGiftForm));
+  document.querySelectorAll("[data-gift-whatsapp]").forEach((button) => button.addEventListener("click", async () => {
+    const result = await api(`/api/gifts/${button.dataset.giftWhatsapp}/whatsapp`, { method: "POST", body: {} });
+    if (result.fallbackUrl) window.open(result.fallbackUrl, "_blank", "noopener");
+  }));
+  document.querySelectorAll("[data-gift-print]").forEach((button) => button.addEventListener("click", () => printGift(Number(button.dataset.giftPrint))));
   document.querySelectorAll("[data-new]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.new)));
   document.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => openForm(button.dataset.edit, Number(button.dataset.id))));
   document.querySelectorAll("[data-filter]").forEach((input) => input.addEventListener("input", () => {
@@ -1078,6 +1115,125 @@ function openFormLegacy(resource, id = null, defaults = {}) {
 
 function closeModal() {
   document.getElementById("modalRoot").innerHTML = "";
+}
+
+function showModal(title, body, onSubmit) {
+  document.getElementById("modalRoot").innerHTML = html`
+    <div class="modal"><form class="modal-card wide" id="featureForm">
+      <div class="modal-head"><h3>${title}</h3><button type="button" class="btn ghost" id="closeModal">${tr("close")}</button></div>
+      <div class="modal-body">${body}</div>
+      <div class="modal-foot"><button class="btn">${tr("save")}</button><div id="formError" class="muted"></div></div>
+    </form></div>`;
+  document.getElementById("closeModal").addEventListener("click", closeModal);
+  document.getElementById("featureForm").addEventListener("submit", onSubmit);
+}
+
+function openConsentUpload() {
+  const he = state.lang === "he";
+  showModal(he ? "העלאת טופס PDF" : "رفع ملف PDF", html`
+    ${select("categoryId", he ? "קטגוריה" : "القسم", state.data.categories.map((c) => [c.id, c.name]), "", false)}
+    ${field("title", he ? "שם הטופס" : "اسم الملف")}
+    <div class="field full"><label>PDF</label><input name="file" type="file" accept="application/pdf" required></div>
+  `, async (event) => {
+    event.preventDefault();
+    try {
+      await api("/api/consents", { method: "POST", body: new FormData(event.currentTarget) });
+      closeModal();
+      await loadData();
+      renderApp();
+    } catch (err) {
+      document.getElementById("formError").textContent = err.message;
+    }
+  });
+}
+
+function openConsentSignature(id) {
+  const he = state.lang === "he";
+  const template = (state.data.consentTemplates || []).find((item) => item.id === id);
+  showModal(he ? "חתימה על טופס" : "توقيع الإقرار", html`
+    <div class="field full"><iframe class="pdf-preview" src="${template?.url || ""}"></iframe></div>
+    ${select("clientId", he ? "לקוח" : "العميل", clientOptions(), "")}
+    ${field("signerName", he ? "שם החותם" : "اسم الموقّع")}
+    <div class="field full"><label>${he ? "חתימה" : "التوقيع"}</label><canvas id="signaturePad" class="signature-pad"></canvas><button class="btn secondary" type="button" id="clearSignature">${he ? "ניקוי" : "مسح"}</button></div>
+  `, async (event) => {
+    event.preventDefault();
+    try {
+      const canvas = document.getElementById("signaturePad");
+      const form = Object.fromEntries(new FormData(event.currentTarget));
+      await api(`/api/consents/${id}/sign`, { method: "POST", body: { ...form, clientId: Number(form.clientId), signatureData: canvas.toDataURL("image/png") } });
+      closeModal();
+      await loadData();
+      renderApp();
+    } catch (err) {
+      document.getElementById("formError").textContent = err.message;
+    }
+  });
+  initSignaturePad();
+}
+
+function initSignaturePad() {
+  const canvas = document.getElementById("signaturePad");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const resize = () => {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(320, Math.floor(rect.width * devicePixelRatio));
+    canvas.height = Math.floor(180 * devicePixelRatio);
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#1B2D25";
+  };
+  resize();
+  let drawing = false;
+  const point = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const touch = event.touches?.[0];
+    return { x: (touch?.clientX ?? event.clientX) - rect.left, y: (touch?.clientY ?? event.clientY) - rect.top };
+  };
+  const start = (event) => { event.preventDefault(); drawing = true; const p = point(event); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const move = (event) => { if (!drawing) return; event.preventDefault(); const p = point(event); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+  const stop = () => { drawing = false; };
+  canvas.addEventListener("mousedown", start);
+  canvas.addEventListener("mousemove", move);
+  canvas.addEventListener("mouseup", stop);
+  canvas.addEventListener("mouseleave", stop);
+  canvas.addEventListener("touchstart", start, { passive: false });
+  canvas.addEventListener("touchmove", move, { passive: false });
+  canvas.addEventListener("touchend", stop);
+  document.getElementById("clearSignature")?.addEventListener("click", () => ctx.clearRect(0, 0, canvas.width, canvas.height));
+}
+
+function openFeedbackRequest() {
+  const he = state.lang === "he";
+  const appointments = state.data.appointments.map((a) => [a.id, `${a.date} ${a.time} - ${a.clientName} - ${a.serviceName}`]);
+  showModal(he ? "שליחת בקשת משוב" : "إرسال طلب تقييم", select("appointmentId", he ? "תור" : "الموعد", appointments), async (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget));
+    const result = await api("/api/feedback", { method: "POST", body: { appointmentId: Number(form.appointmentId) } });
+    if (result.fallbackUrl) window.open(result.fallbackUrl, "_blank", "noopener");
+    closeModal();
+    await loadData();
+    renderApp();
+  });
+}
+
+function openGiftForm() {
+  const he = state.lang === "he";
+  showModal(he ? "כרטיס מתנה" : "كرت هدية", html`
+    ${select("fromClientId", he ? "מאת לקוח" : "من العميل", clientOptions(), "", false)}
+    ${select("toClientId", he ? "אל לקוח" : "إلى العميل", clientOptions(), "", false)}
+    ${select("serviceId", he ? "שירות" : "الخدمة", state.data.services.map((s) => [s.id, s.name]), "", false)}
+    ${field("sessions", he ? "מספר מפגשים" : "عدد الجلسات", 1, "number")}
+    ${field("message", he ? "הודעה" : "رسالة", "", "textarea", false, "full")}
+  `, async (event) => {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget));
+    await api("/api/gifts", { method: "POST", body: { ...form, fromClientId: numberOrNull(form.fromClientId), toClientId: numberOrNull(form.toClientId), serviceId: numberOrNull(form.serviceId), sessions: Number(form.sessions || 1) } });
+    closeModal();
+    await loadData();
+    renderApp();
+  });
 }
 
 function showCenterError(message) {
@@ -1470,6 +1626,60 @@ function renderUsersHe() {
   return simpleTable("users", h, state.data.users, (u) => [u.username, u.name, roleLabel(u.role), yesNo(u.active)]);
 }
 
+function clientOptions() {
+  return state.data.clients.map((c) => [c.id, `${c.fname} ${c.lname}`]);
+}
+
+function renderConsents() {
+  const he = state.lang === "he";
+  const templates = state.data.consentTemplates || [];
+  const signatures = state.data.consentSignatures || [];
+  return html`
+    <div class="feature-grid">
+      <div class="card"><h3>${he ? "טפסי PDF לפי קטגוריה" : "ملفات PDF حسب القسم"}</h3>
+        <div class="stack-list">${templates.map((t) => `<div class="feature-row"><div><strong>${t.title}</strong><span>${t.categoryName || "-"}</span></div><div class="actions"><a class="btn secondary" href="${t.url}" target="_blank" rel="noopener">PDF</a><button class="btn secondary" data-sign-consent="${t.id}">${he ? "חתימה" : "توقيع"}</button>${state.user.role !== "therapist" ? `<button class="btn danger" data-delete-consent="${t.id}">${tr("delete")}</button>` : ""}</div></div>`).join("") || `<p class="muted">${tr("noData")}</p>`}</div>
+      </div>
+      <div class="card"><h3>${he ? "חתימות אחרונות" : "آخر التواقيع"}</h3>
+        <div class="stack-list">${signatures.map((s) => `<div class="feature-row"><div><strong>${s.clientName || s.signerName}</strong><span>${s.templateTitle} · ${s.signedAt || ""}</span></div></div>`).join("") || `<p class="muted">${tr("noData")}</p>`}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderFeedback() {
+  const he = state.lang === "he";
+  const rows = state.data.feedbackRequests || [];
+  return html`
+    <div class="card"><h3>${he ? "בקשות משוב" : "طلبات التقييم"}</h3>
+      <div class="stack-list">${rows.map((r) => `<div class="feature-row"><div><strong>${r.clientName || "-"}</strong><span>${r.serviceName || ""} · ${r.date || ""} ${r.time || ""}</span>${r.comment ? `<small>${r.comment}</small>` : ""}</div><div><span class="pill ${r.status === "submitted" ? "done" : "pending"}">${r.status === "submitted" ? (he ? "התקבל" : "تم") : (he ? "נשלח" : "أرسل")}</span> ${r.rating ? `<strong>${r.rating}/5</strong>` : ""}</div></div>`).join("") || `<p class="muted">${tr("noData")}</p>`}</div>
+    </div>
+  `;
+}
+
+function renderGifts() {
+  const he = state.lang === "he";
+  const rows = state.data.giftCards || [];
+  return html`
+    <div class="gift-board">${rows.map((g) => `<div class="gift-card">
+      <div class="gift-ribbon">${he ? "מתנה" : "هدية"}</div>
+      <h3>${g.serviceName || (he ? "שירות בקליניקה" : "جلسة في العيادة")}</h3>
+      <p>${g.toClientName || ""}</p>
+      <strong>${g.sessions} ${he ? "מפגשים" : "جلسة"}</strong>
+      <code>${g.code}</code>
+      <div class="actions"><button class="btn secondary" data-gift-whatsapp="${g.id}">WhatsApp</button><button class="btn secondary" data-gift-print="${g.id}">${he ? "הדפסה" : "طباعة"}</button></div>
+    </div>`).join("") || `<div class="card"><p class="muted">${tr("noData")}</p></div>`}</div>
+  `;
+}
+
+function restoreCard() {
+  const he = state.lang === "he";
+  return html`<div class="card"><h3>${he ? "שחזור גיבוי" : "استرجاع نسخة احتياطية"}</h3>
+    <p class="muted">${he ? "לפני השחזור המערכת יוצרת גיבוי בטיחותי." : "قبل الاسترجاع ينشئ النظام نسخة أمان تلقائيا."}</p>
+    <form id="restoreForm" class="inline-form upload-form"><input name="backup" type="file" accept=".sqlite,.db,.dump" required><button class="btn danger">${he ? "שחזור" : "استرجاع"}</button></form>
+    <div class="muted upload-hint">${he ? "מומלץ לבצע בשעה שאין משתמשים במערכת." : "يفضل التنفيذ في وقت لا يوجد فيه مستخدمون داخل النظام."}</div>
+  </div>`;
+}
+
 function renderSettingsHe(message = "") {
   const s = state.data.settings || {};
   const he = state.lang === "he";
@@ -1485,6 +1695,7 @@ function renderSettingsHe(message = "") {
         ${field("whatsappTemplate", he ? "הודעת WhatsApp" : "رسالة WhatsApp", s.whatsappTemplate || "", "textarea", false, "full")}
         <button class="btn">${tr("save")}</button></form>
         <div class="backup-panel"><h3>${he ? "עותק חיצוני של המערכת" : "نسخة خارجية من النظام"}</h3><p class="muted">${he ? "הורדת עותק של בסיס הנתונים למחשב." : "تحميل نسخة قاعدة البيانات على جهاز الكمبيوتر."}</p><a class="btn secondary" href="/api/system/export" download>${he ? "הורדת עותק" : "تحميل النسخة"}</a></div></div>` : ""}
+      ${state.user.role === "admin" ? restoreCard() : ""}
       <div class="card"><h3>${he ? "שינוי סיסמה" : "تغيير كلمة المرور"}</h3>${message ? `<div class="alert">${message}</div>` : ""}<form id="passwordForm"><div class="field"><label>${he ? "סיסמה נוכחית" : "كلمة المرور الحالية"}</label><input name="currentPassword" type="password" required></div><div class="field"><label>${he ? "סיסמה חדשה" : "كلمة المرور الجديدة"}</label><input name="newPassword" type="password" minlength="8" required></div><button class="btn">${he ? "שינוי סיסמה" : "تغيير كلمة المرور"}</button></form></div>
     </div>
   `;
@@ -1764,6 +1975,15 @@ function printReceipt(id) {
   const total = Number(a.price || 0);
   const win = window.open("", "_blank", "width=720,height=820");
   win.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>קבלה</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#102220}.receipt{max-width:560px;margin:auto;border:1px solid #d8e6e1;border-radius:12px;padding:28px}img{width:70px}.row{display:flex;justify-content:space-between;border-bottom:1px solid #eef3f1;padding:10px 0}.total{font-size:20px;font-weight:700}</style></head><body><div class="receipt"><img src="${settings.logoUrl || "/logo.svg"}"><h1>${settings.clinicName || "CMS SUZAN"}</h1><h2>חשבונית / קבלה</h2><div class="row"><span>לקוח</span><strong>${a.clientName}</strong></div><div class="row"><span>שירות</span><strong>${a.serviceName}</strong></div><div class="row"><span>תאריך</span><strong>${a.date} ${a.time}</strong></div><div class="row"><span>מצב תשלום</span><strong>${paymentLabel[a.paymentStatus || "unpaid"]}</strong></div><div class="row total"><span>סה״כ</span><strong>${currency()}${total.toLocaleString()}</strong></div><div class="row"><span>שולם</span><strong>${currency()}${paid.toLocaleString()}</strong></div><div class="row"><span>יתרה</span><strong>${currency()}${Math.max(total - paid, 0).toLocaleString()}</strong></div></div><script>print();</script></body></html>`);
+  win.document.close();
+}
+
+function printGift(id) {
+  const gift = (state.data.giftCards || []).find((item) => item.id === id);
+  if (!gift) return;
+  const settings = state.data.settings || {};
+  const win = window.open("", "_blank", "width=720,height=820");
+  win.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>Gift</title><style>body{font-family:Arial,sans-serif;background:#f6faf8;padding:30px}.gift{max-width:520px;margin:auto;border:1px solid #d8e6e1;border-radius:18px;background:white;padding:34px;text-align:center;box-shadow:0 18px 50px rgba(45,106,79,.18)}h1{color:#2d6a4f}.code{font-size:22px;letter-spacing:2px;border:1px dashed #2d6a4f;border-radius:12px;padding:14px;margin:18px 0}</style></head><body><div class="gift"><img src="${settings.logoUrl || "/logo.svg"}" width="76"><h1>${settings.clinicName || "CMS SUZAN"}</h1><h2>כרטיס מתנה</h2><p>${gift.toClientName || ""}</p><h3>${gift.serviceName || ""}</h3><strong>${gift.sessions || 1} מפגשים</strong><div class="code">${gift.code}</div><p>${gift.message || ""}</p></div><script>print();</script></body></html>`);
   win.document.close();
 }
 

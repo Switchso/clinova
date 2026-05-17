@@ -81,6 +81,54 @@ CREATE TABLE IF NOT EXISTS client_files (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS consent_templates (
+  id BIGSERIAL PRIMARY KEY,
+  category_id BIGINT REFERENCES categories(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  original_name TEXT DEFAULT '',
+  mime_type TEXT DEFAULT 'application/pdf',
+  size BIGINT NOT NULL DEFAULT 0,
+  path TEXT DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS consent_signatures (
+  id BIGSERIAL PRIMARY KEY,
+  template_id BIGINT NOT NULL REFERENCES consent_templates(id) ON DELETE CASCADE,
+  client_id BIGINT REFERENCES clients(id) ON DELETE SET NULL,
+  appointment_id BIGINT REFERENCES appointments(id) ON DELETE SET NULL,
+  signer_name TEXT NOT NULL,
+  signature_data TEXT NOT NULL,
+  signed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS feedback_requests (
+  id BIGSERIAL PRIMARY KEY,
+  appointment_id BIGINT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  rating INTEGER,
+  comment TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'sent',
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  submitted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS gift_cards (
+  id BIGSERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  from_client_id BIGINT REFERENCES clients(id) ON DELETE SET NULL,
+  to_client_id BIGINT REFERENCES clients(id) ON DELETE SET NULL,
+  service_id BIGINT REFERENCES services(id) ON DELETE SET NULL,
+  sessions INTEGER NOT NULL DEFAULT 1,
+  message TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  redeemed_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -104,3 +152,6 @@ CREATE INDEX IF NOT EXISTS idx_clients_active ON clients(active);
 CREATE INDEX IF NOT EXISTS idx_appointments_active ON appointments(active);
 CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
 CREATE INDEX IF NOT EXISTS idx_appointments_therapist_date ON appointments(therapist_id, date);
+CREATE INDEX IF NOT EXISTS idx_consent_templates_active ON consent_templates(active);
+CREATE INDEX IF NOT EXISTS idx_feedback_requests_token ON feedback_requests(token);
+CREATE INDEX IF NOT EXISTS idx_gift_cards_code ON gift_cards(code);

@@ -166,6 +166,50 @@ async function initSqlite() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS consent_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      original_name TEXT DEFAULT '',
+      mime_type TEXT DEFAULT 'application/pdf',
+      size INTEGER NOT NULL DEFAULT 0,
+      path TEXT DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS consent_signatures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL REFERENCES consent_templates(id) ON DELETE CASCADE,
+      client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+      appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+      signer_name TEXT NOT NULL,
+      signature_data TEXT NOT NULL,
+      signed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS feedback_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE,
+      rating INTEGER,
+      comment TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'sent',
+      sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      submitted_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS gift_cards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      from_client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+      to_client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+      service_id INTEGER REFERENCES services(id) ON DELETE SET NULL,
+      sessions INTEGER NOT NULL DEFAULT 1,
+      message TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      redeemed_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

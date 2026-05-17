@@ -8,6 +8,7 @@
   --gold: #C8963F;
   --gold-light: #F6E5C3;
   --bg: #F8FAF9;
+  --surface: #F4F9F6;
   --panel: #FFFFFF;
   --text: #1B2D25;
   --muted: #6B8C7B;
@@ -905,6 +906,111 @@ tr:hover td { background: #F4F9F6; }
   font-size: 11px;
 }
 
+.feature-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
+  gap: 14px;
+}
+
+.stack-list {
+  display: grid;
+  gap: 10px;
+}
+
+.feature-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.feature-row div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.feature-row span,
+.feature-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pdf-preview {
+  width: 100%;
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.signature-pad {
+  width: 100%;
+  height: 180px;
+  border: 1px dashed var(--primary);
+  border-radius: 10px;
+  background: #fff;
+  touch-action: none;
+}
+
+.gift-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.gift-card {
+  position: relative;
+  min-height: 260px;
+  padding: 26px 18px 18px;
+  border: 1px solid #d7eadf;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #ffffff 0%, #f1faf5 100%);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  overflow: hidden;
+}
+
+.gift-card::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -34px;
+  top: 22px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: var(--primary-pale);
+}
+
+.gift-card > * {
+  position: relative;
+}
+
+.gift-ribbon {
+  justify-self: start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--gold-light);
+  color: #8a6324;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.gift-card code {
+  padding: 10px;
+  border: 1px dashed var(--primary);
+  border-radius: 10px;
+  background: #fff;
+  text-align: center;
+  direction: ltr;
+}
+
 @media (max-width: 900px) {
   :root { --sidebar-w: 100%; }
   .shell {
@@ -1024,7 +1130,7 @@ tr:hover td { background: #F4F9F6; }
   .calendar-day {
     min-height: 150px;
   }
-  .settings-grid, .client-profile { grid-template-columns: 1fr; }
+  .settings-grid, .client-profile, .feature-grid { grid-template-columns: 1fr; }
   .inline-form, .file-row { grid-template-columns: 1fr; }
   .work-days { grid-template-columns: repeat(2, 1fr); }
   .modal {

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { db, databaseEngine, initDatabase, rowToUser, audit } from "./db.js";
@@ -23,6 +23,10 @@ const permissions = {
   reports: ["admin"],
   audit: ["admin"],
   settings_write: ["admin"],
+  consents: ["admin", "reception", "therapist"],
+  consents_write: ["admin", "reception"],
+  feedback: ["admin", "reception"],
+  gifts: ["admin", "reception"],
   clients_read: ["admin", "reception", "therapist"],
   clients_write: ["admin", "reception"],
   appointments_read: ["admin", "reception", "therapist"],
@@ -41,6 +45,8 @@ const mimeTypes = {
   ".svg": "image/svg+xml",
   ".jpg": "image/jpeg",
   ".png": "image/png",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
 };
 
 function json(res, status, data) {
@@ -314,6 +320,70 @@ async function updateClinicSettings(values) {
   }
 }
 
+async function consentTemplates() {
+  return await db.prepare(`
+    SELECT t.id, t.category_id AS categoryId, t.title, t.url, t.original_name AS originalName,
+           t.mime_type AS mimeType, t.size, t.created_at AS createdAt, c.name AS categoryName
+    FROM consent_templates t
+    LEFT JOIN categories c ON c.id = t.category_id
+    WHERE t.active = 1
+    ORDER BY t.id DESC
+  `).all();
+}
+
+async function consentTemplateById(id) {
+  return await db.prepare(`
+    SELECT id, category_id AS categoryId, title, url, original_name AS originalName, mime_type AS mimeType, size, path, active
+    FROM consent_templates
+    WHERE id = ? AND active = 1
+  `).get(id);
+}
+
+async function consentSignatures() {
+  return await db.prepare(`
+    SELECT s.id, s.template_id AS templateId, s.client_id AS clientId, s.appointment_id AS appointmentId,
+           s.signer_name AS signerName, s.signed_at AS signedAt, t.title AS templateTitle,
+           c.fname || ' ' || c.lname AS clientName
+    FROM consent_signatures s
+    JOIN consent_templates t ON t.id = s.template_id
+    LEFT JOIN clients c ON c.id = s.client_id
+    ORDER BY s.id DESC
+    LIMIT 100
+  `).all();
+}
+
+async function feedbackRequests() {
+  return await db.prepare(`
+    SELECT f.id, f.appointment_id AS appointmentId, f.token, f.rating, f.comment, f.status,
+           f.sent_at AS sentAt, f.submitted_at AS submittedAt,
+           c.fname || ' ' || c.lname AS clientName, c.phone AS clientPhone,
+           s.name AS serviceName, a.date, a.time
+    FROM feedback_requests f
+    JOIN appointments a ON a.id = f.appointment_id
+    JOIN clients c ON c.id = a.client_id
+    JOIN services s ON s.id = a.service_id
+    ORDER BY f.id DESC
+    LIMIT 120
+  `).all();
+}
+
+async function giftCards() {
+  return await db.prepare(`
+    SELECT g.id, g.code, g.from_client_id AS fromClientId, g.to_client_id AS toClientId,
+           g.service_id AS serviceId, g.sessions, g.message, g.status,
+           g.created_at AS createdAt, g.redeemed_at AS redeemedAt,
+           fc.fname || ' ' || fc.lname AS fromClientName,
+           tc.fname || ' ' || tc.lname AS toClientName,
+           tc.phone AS toClientPhone,
+           s.name AS serviceName
+    FROM gift_cards g
+    LEFT JOIN clients fc ON fc.id = g.from_client_id
+    LEFT JOIN clients tc ON tc.id = g.to_client_id
+    LEFT JOIN services s ON s.id = g.service_id
+    ORDER BY g.id DESC
+  `).all();
+}
+
 async function clientFiles(clientId) {
   return await db.prepare(`
     SELECT id, client_id AS clientId, name, url, original_name AS originalName, mime_type AS mimeType, size, notes, created_at AS createdAt
@@ -374,6 +444,32 @@ async function api(req, res, url) {
       environment: process.env.NODE_ENV || "development",
     });
     return;
+  }
+
+  if (method === "GET" && url.pathname.startsWith("/api/public/feedback/")) {
+    const token = url.pathname.split("/").pop();
+    const row = await db.prepare(`
+      SELECT f.id, f.status, f.rating, f.comment, c.fname || ' ' || c.lname AS clientName,
+             s.name AS serviceName, a.date, a.time
+      FROM feedback_requests f
+      JOIN appointments a ON a.id = f.appointment_id
+      JOIN clients c ON c.id = a.client_id
+      JOIN services s ON s.id = a.service_id
+      WHERE f.token = ?
+    `).get(token);
+    if (!row) return json(res, 404, { error: "Feedback request not found." });
+    return json(res, 200, row);
+  }
+
+  if (method === "POST" && url.pathname.startsWith("/api/public/feedback/")) {
+    const token = url.pathname.split("/").pop();
+    const body = await readBody(req);
+    const rating = Math.max(1, Math.min(5, Number(body.rating || 0)));
+    if (!rating) return json(res, 400, { error: "Rating is required." });
+    const result = await db.prepare("UPDATE feedback_requests SET rating = ?, comment = ?, status = 'submitted', submitted_at = CURRENT_TIMESTAMP WHERE token = ?")
+      .run(rating, String(body.comment || ""), token);
+    if (!result.changes) return json(res, 404, { error: "Feedback request not found." });
+    return json(res, 200, { ok: true });
   }
 
   if (method === "POST" && url.pathname === "/api/login") {
@@ -510,6 +606,24 @@ async function api(req, res, url) {
     return;
   }
 
+  if (method === "POST" && url.pathname === "/api/system/restore") {
+    const user = await requirePermission(req, res, "settings_write");
+    if (!user) return;
+    if (config.databaseUrl) return json(res, 400, { error: "Restore upload is available for SQLite. Use pg_restore for PostgreSQL backups." });
+    const safety = createBackup({ reason: "before-restore" });
+    const { files } = await readMultipart(req);
+    const file = files.backup;
+    if (!file || file.buffer.length === 0) return json(res, 400, { error: "Choose a backup file to restore." });
+    const restoreDir = resolve(config.backup.dir, "restore-uploads");
+    mkdirSync(restoreDir, { recursive: true });
+    const source = resolve(restoreDir, `${Date.now()}-${safeFileName(file.filename)}`);
+    writeFileSync(source, file.buffer);
+    copyFileSync(source, config.databasePath);
+    json(res, 200, { ok: true, safetyBackup: safety.target, restarting: true });
+    setTimeout(() => process.exit(0), 500);
+    return;
+  }
+
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     const user = await requireUser(req, res);
     if (!user) return;
@@ -520,6 +634,10 @@ async function api(req, res, url) {
       services: await db.prepare("SELECT id, name, category_id AS categoryId, duration, price, active FROM services ORDER BY name").all(),
       clients: await listClients(user),
       appointments: await listAppointments(user),
+      consentTemplates: await consentTemplates(),
+      consentSignatures: user.role === "admin" || user.role === "reception" ? await consentSignatures() : [],
+      feedbackRequests: user.role === "admin" || user.role === "reception" ? await feedbackRequests() : [],
+      giftCards: user.role === "admin" || user.role === "reception" ? await giftCards() : [],
       settings: await clinicSettings(),
       audits: user.role === "admin" ? await listAudit() : [],
     });
@@ -738,6 +856,105 @@ async function crudRoutes(req, res, url) {
     if (method === "PUT" && id) {
       await db.prepare("UPDATE appointments SET client_id = ?, service_id = ?, therapist_id = ?, date = ?, time = ?, status = ?, payment_status = ?, paid_amount = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.clientId, body.serviceId, therapistId, body.date, body.time, body.status || "pending", paymentStatus, paidAmount, body.notes || "", id);
       await audit(user.id, "update", "appointments", id);
+      return json(res, 200, { ok: true });
+    }
+  }
+
+  if (resource === "consents") {
+    const user = await requirePermission(req, res, method === "GET" || parts[3] === "sign" ? "consents" : "consents_write");
+    if (!user) return;
+    if (method === "POST" && id && parts[3] === "sign") {
+      const body = await readBody(req);
+      if (!body.signatureData || !String(body.signatureData).startsWith("data:image/")) return json(res, 400, { error: "Signature is required." });
+      const result = await db.prepare("INSERT INTO consent_signatures (template_id, client_id, appointment_id, signer_name, signature_data) VALUES (?, ?, ?, ?, ?)")
+        .run(id, body.clientId || null, body.appointmentId || null, String(body.signerName || ""), body.signatureData);
+      await audit(user.id, "sign", "consent_templates", id, { signatureId: result.lastInsertRowid });
+      return json(res, 201, { id: result.lastInsertRowid });
+    }
+    if (method === "GET" && id && parts[3] === "download") {
+      const file = await consentTemplateById(id);
+      if (!file) return json(res, 404, { error: "Consent file not found." });
+      if (!existsSync(file.path)) return json(res, 404, { error: "Consent file missing from storage." });
+      const buffer = readFileSync(file.path);
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": buffer.length,
+        "Content-Disposition": `inline; filename*=UTF-8''${contentDispositionName(file.originalName || file.title)}`,
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(buffer);
+      return;
+    }
+    if (method === "GET") return json(res, 200, await consentTemplates());
+    if (method === "POST") {
+      const { fields, files } = await readMultipart(req);
+      const file = files.file;
+      if (!file || file.buffer.length === 0) return json(res, 400, { error: "Choose a PDF file." });
+      if (file.type !== "application/pdf") return json(res, 400, { error: "Only PDF consent files are supported." });
+      const consentDir = resolve(config.uploads.dir, "consents");
+      mkdirSync(consentDir, { recursive: true });
+      const storedName = `${Date.now()}-${randomUUID()}.pdf`;
+      const target = resolve(consentDir, storedName);
+      writeFileSync(target, file.buffer);
+      const result = await db.prepare("INSERT INTO consent_templates (category_id, title, url, original_name, mime_type, size, path) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(fields.categoryId || null, String(fields.title || file.filename).trim(), "", file.filename, file.type, file.buffer.length, target);
+      const downloadUrl = `/api/consents/${result.lastInsertRowid}/download`;
+      await db.prepare("UPDATE consent_templates SET url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(downloadUrl, result.lastInsertRowid);
+      await audit(user.id, "create", "consent_templates", result.lastInsertRowid);
+      return json(res, 201, { id: result.lastInsertRowid, url: downloadUrl });
+    }
+    if (method === "DELETE" && id) {
+      await db.prepare("UPDATE consent_templates SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      await audit(user.id, "archive", "consent_templates", id);
+      return json(res, 200, { ok: true });
+    }
+  }
+
+  if (resource === "feedback") {
+    const user = await requirePermission(req, res, "feedback");
+    if (!user) return;
+    if (method === "GET") return json(res, 200, await feedbackRequests());
+    if (method === "POST") {
+      const body = await readBody(req);
+      const appointment = (await listAppointments(user)).find((item) => item.id === Number(body.appointmentId));
+      if (!appointment) return json(res, 404, { error: "Appointment not found." });
+      const token = randomUUID();
+      const result = await db.prepare("INSERT INTO feedback_requests (appointment_id, token) VALUES (?, ?)").run(appointment.id, token);
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const host = req.headers["x-forwarded-host"] || req.headers.host;
+      const link = `${proto}://${host}/feedback.html?token=${encodeURIComponent(token)}`;
+      const message = `שלום ${appointment.clientName}, נשמח לקבל חוות דעת קצרה אחרי הטיפול: ${link}`;
+      const sent = await sendWhatsAppText({ to: appointment.clientPhone, message });
+      await audit(user.id, sent.ok ? "feedback_whatsapp_sent" : "feedback_whatsapp_fallback", "feedback_requests", result.lastInsertRowid);
+      return json(res, 201, { id: result.lastInsertRowid, ...sent, fallbackUrl: sent.fallbackUrl || whatsappFallbackUrl(appointment.clientPhone, message) });
+    }
+  }
+
+  if (resource === "gifts") {
+    const user = await requirePermission(req, res, "gifts");
+    if (!user) return;
+    if (method === "GET") return json(res, 200, await giftCards());
+    if (method === "POST" && id && parts[3] === "whatsapp") {
+      const gift = (await giftCards()).find((item) => item.id === id);
+      if (!gift) return json(res, 404, { error: "Gift card not found." });
+      const message = `🎁 ${gift.toClientName || ""}, קיבלת מתנה מ-${gift.fromClientName || "CMS SUZAN"}: ${gift.sessions} جلسة ${gift.serviceName || ""}. קוד המתנה: ${gift.code}. ${gift.message || ""}`;
+      const sent = await sendWhatsAppText({ to: gift.toClientPhone, message });
+      await audit(user.id, sent.ok ? "gift_whatsapp_sent" : "gift_whatsapp_fallback", "gift_cards", id);
+      return json(res, 200, { ...sent, fallbackUrl: sent.fallbackUrl || whatsappFallbackUrl(gift.toClientPhone, message) });
+    }
+    if (method === "POST") {
+      const body = await readBody(req);
+      const code = `GIFT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      const result = await db.prepare("INSERT INTO gift_cards (code, from_client_id, to_client_id, service_id, sessions, message) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(code, body.fromClientId || null, body.toClientId || null, body.serviceId || null, Math.max(1, Number(body.sessions || 1)), String(body.message || ""));
+      await audit(user.id, "create", "gift_cards", result.lastInsertRowid);
+      return json(res, 201, { id: result.lastInsertRowid, code });
+    }
+    if (method === "PUT" && id) {
+      const body = await readBody(req);
+      await db.prepare("UPDATE gift_cards SET status = ?, redeemed_at = CASE WHEN ? = 'redeemed' THEN CURRENT_TIMESTAMP ELSE redeemed_at END WHERE id = ?")
+        .run(body.status || "active", body.status || "active", id);
+      await audit(user.id, "update", "gift_cards", id);
       return json(res, 200, { ok: true });
     }
   }
