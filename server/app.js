@@ -368,6 +368,13 @@ async function consentSignatures() {
   `).all();
 }
 
+function pdfSafeText(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "?")
+    .slice(0, 120);
+}
+
 async function missingLegalConsents({ clientId, appointmentId, serviceId }) {
   const service = await db.prepare("SELECT category_id FROM services WHERE id = ?").get(serviceId);
   if (!service?.category_id) return [];
@@ -407,9 +414,9 @@ async function createSignedConsentClientFile({ signatureId, templateId, clientId
   const page = pdf.addPage();
   const { width, height } = page.getSize();
   page.drawText("SIGNED LEGAL CONSENT", { x: 48, y: height - 70, size: 20, font, color: rgb(0.18, 0.42, 0.31) });
-  page.drawText(`Form: ${template.title}`, { x: 48, y: height - 110, size: 12, font });
-  page.drawText(`Client: ${client.fname} ${client.lname}`, { x: 48, y: height - 132, size: 12, font });
-  page.drawText(`Signer: ${signerName}`, { x: 48, y: height - 154, size: 12, font });
+  page.drawText(`Form: ${pdfSafeText(template.title)}`, { x: 48, y: height - 110, size: 12, font });
+  page.drawText(`Client: ${pdfSafeText(`${client.fname} ${client.lname}`)}`, { x: 48, y: height - 132, size: 12, font });
+  page.drawText(`Signer: ${pdfSafeText(signerName)}`, { x: 48, y: height - 154, size: 12, font });
   page.drawText(`Appointment: ${appointmentId || "-"}`, { x: 48, y: height - 176, size: 12, font });
   page.drawText(`Signed at: ${signedAt}`, { x: 48, y: height - 198, size: 12, font });
   page.drawRectangle({ x: 48, y: height - 385, width: width - 96, height: 145, borderColor: rgb(0.18, 0.42, 0.31), borderWidth: 1 });
