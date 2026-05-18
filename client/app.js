@@ -980,7 +980,7 @@ function bindPageActions() {
   document.querySelectorAll("[data-calendar-date]").forEach((day) => day.addEventListener("click", (event) => {
     if (event.target.closest("[data-open-appointment]")) return;
     state.calendarDate = day.dataset.calendarDate;
-    openForm("appointments", null, { date: day.dataset.calendarDate });
+    openForm("appointments", null, { date: day.dataset.calendarDate, fromCalendar: true });
   }));
   document.querySelectorAll("[data-receipt]").forEach((button) => button.addEventListener("click", () => printReceipt(Number(button.dataset.receipt))));
   document.querySelectorAll("[data-whatsapp]").forEach((button) => button.addEventListener("click", () => sendReminder(Number(button.dataset.whatsapp), "whatsapp")));
@@ -1335,8 +1335,12 @@ function field(name, label, value = "", type = "text", required = true, classNam
   return `<div class="field ${className}"><label>${label}</label><input name="${name}" type="${type}" value="${value ?? ""}" ${required ? "required" : ""}></div>`;
 }
 
-function select(name, label, options, value = "", required = true) {
-  return `<div class="field"><label>${label}</label><select name="${name}" ${required ? "required" : ""}>${required ? "" : `<option value="">-</option>`}${options.map(([id, text]) => `<option value="${id}" ${String(id) === String(value) ? "selected" : ""}>${text}</option>`).join("")}</select></div>`;
+function select(name, label, options, value = "", required = true, placeholder = "-") {
+  const hasValue = value !== undefined && value !== null && String(value) !== "";
+  const emptyOption = (!hasValue || !required || placeholder)
+    ? `<option value="" ${hasValue ? "" : "selected"} ${required ? "disabled" : ""}>${placeholder}</option>`
+    : "";
+  return `<div class="field"><label>${label}</label><select name="${name}" ${required ? "required" : ""}>${emptyOption}${options.map(([id, text]) => `<option value="${id}" ${String(id) === String(value) ? "selected" : ""}>${text}</option>`).join("")}</select></div>`;
 }
 
 function formPayloadLegacy(resource, form) {
@@ -1739,7 +1743,12 @@ function renderSettingsHe(message = "") {
 function formFieldsHe(resource, row) {
   const he = state.lang === "he";
   if (resource === "clients") return html`${field("fname", he ? "שם פרטי" : "الاسم الأول", row.fname)}${field("lname", he ? "שם משפחה" : "اسم العائلة", row.lname)}${field("phone", he ? "טלפון" : "الهاتف", row.phone)}${field("email", he ? "אימייל" : "البريد", row.email, "email", false)}${select("therapistId", he ? "מטפלת" : "المعالجة", therapists(), row.therapistId, false)}${field("notes", he ? "הערות" : "ملاحظات", row.notes, "textarea", false, "full")}`;
-  if (resource === "appointments") return html`${select("clientId", he ? "לקוח" : "العميل", state.data.clients.map((c) => [c.id, `${c.fname} ${c.lname}`]), row.clientId)}${select("serviceId", he ? "שירות" : "الخدمة", state.data.services.filter((s) => s.active).map((s) => [s.id, s.name]), row.serviceId)}${select("therapistId", he ? "מטפלת" : "المعالجة", therapists(), row.therapistId || state.user.id, state.user.role !== "therapist")}${field("date", he ? "תאריך" : "التاريخ", row.date || new Date().toISOString().slice(0, 10), "date")}${field("time", he ? "שעה" : "الوقت", row.time || "09:00", "time")}${select("status", he ? "סטטוס" : "الحالة", [["pending", statusLabel.pending], ["done", statusLabel.done], ["cancelled", statusLabel.cancelled]], row.status || "pending")}${select("paymentStatus", he ? "מצב תשלום" : "حالة الدفع", [["unpaid", paymentLabel.unpaid], ["paid", paymentLabel.paid], ["deposit", paymentLabel.deposit]], row.paymentStatus || "unpaid")}${field("paidAmount", he ? "סכום ששולם" : "المبلغ المدفوع", row.paidAmount || 0, "number", false)}${field("notes", he ? "הערות" : "ملاحظات", row.notes, "textarea", false, "full")}`;
+  if (resource === "appointments") {
+    const isCalendarNew = row.fromCalendar && !row.id;
+    const therapistValue = isCalendarNew ? "" : row.therapistId || state.user.id;
+    const therapistRequired = isCalendarNew ? true : state.user.role !== "therapist";
+    return html`${select("clientId", he ? "לקוח" : "العميل", state.data.clients.map((c) => [c.id, `${c.fname} ${c.lname}`]), row.clientId || "", true)}${select("serviceId", he ? "שירות" : "الخدمة", state.data.services.filter((s) => s.active).map((s) => [s.id, s.name]), row.serviceId || "", true)}${select("therapistId", he ? "מטפלת" : "المعالجة", therapists(), therapistValue, therapistRequired)}${field("date", he ? "תאריך" : "التاريخ", row.date || new Date().toISOString().slice(0, 10), "date")}${field("time", he ? "שעה" : "الوقت", row.time || "09:00", "time")}${select("status", he ? "סטטוס" : "الحالة", [["pending", statusLabel.pending], ["done", statusLabel.done], ["cancelled", statusLabel.cancelled]], row.status || "pending")}${select("paymentStatus", he ? "מצב תשלום" : "حالة الدفع", [["unpaid", paymentLabel.unpaid], ["paid", paymentLabel.paid], ["deposit", paymentLabel.deposit]], row.paymentStatus || "unpaid")}${field("paidAmount", he ? "סכום ששולם" : "المبلغ المدفوع", row.paidAmount || 0, "number", false)}${field("notes", he ? "הערות" : "ملاحظات", row.notes, "textarea", false, "full")}`;
+  }
   if (resource === "categories") return field("name", he ? "שם קטגוריה" : "اسم القسم", row.name);
   if (resource === "services") return html`${field("name", he ? "שם שירות" : "اسم الخدمة", row.name)}${select("categoryId", he ? "קטגוריה" : "القسم", state.data.categories.map((c) => [c.id, c.name]), row.categoryId)}${field("duration", he ? "משך בדקות" : "المدة بالدقائق", row.duration || 60, "number")}${field("price", he ? "מחיר" : "السعر", row.price || 0, "number")}${select("active", he ? "פעיל" : "فعال", [["true", yesNo(true)], ["false", yesNo(false)]], String(row.active !== false))}`;
   if (resource === "users") return html`${field("username", he ? "שם משתמש" : "اسم المستخدم", row.username)}${field("password", row.id ? (he ? "סיסמה חדשה אופציונלית" : "كلمة مرور جديدة اختيارية") : (he ? "סיסמה" : "كلمة المرور"), "", "password", !row.id)}${field("name", he ? "שם" : "الاسم", row.name)}${field("title", he ? "תיאור תפקיד" : "الوصف الوظيفي", row.title, "text", false)}${select("role", he ? "תפקיד" : "الدور", [["admin", roleLabel("admin")], ["reception", roleLabel("reception")], ["therapist", roleLabel("therapist")]], row.role || "therapist")}${select("active", he ? "פעיל" : "فعال", [["true", yesNo(true)], ["false", yesNo(false)]], String(row.active !== false))}`;
