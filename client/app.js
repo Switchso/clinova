@@ -1112,10 +1112,14 @@ function openFormLegacy(resource, id = null, defaults = {}) {
     </div>
   `;
   document.getElementById("closeModal").addEventListener("click", closeModal);
+  const clientSearch = document.querySelector("[data-client-search]");
+  if (clientSearch) clientSearch.addEventListener("input", () => syncClientSearch(document.getElementById("entityForm"), false));
   document.getElementById("entityForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
+      if (!syncClientSearch(event.currentTarget)) return;
       const body = formPayload(resource, Object.fromEntries(new FormData(event.currentTarget)));
+      delete body.clientSearch;
       await api(`/api/${resource}${id ? `/${id}` : ""}`, { method: id ? "PUT" : "POST", body });
       closeModal();
       await loadData();
@@ -1343,6 +1347,22 @@ function select(name, label, options, value = "", required = true, placeholder =
   return `<div class="field"><label>${label}</label><select name="${name}" ${required ? "required" : ""}>${emptyOption}${options.map(([id, text]) => `<option value="${id}" ${String(id) === String(value) ? "selected" : ""}>${text}</option>`).join("")}</select></div>`;
 }
 
+function searchableClientField(value = "") {
+  const selected = state.data.clients.find((client) => String(client.id) === String(value));
+  const selectedText = selected ? clientSearchText(selected) : "";
+  return html`
+    <div class="field searchable-client">
+      <label>${state.lang === "he" ? "לקוח" : "العميل"}</label>
+      <input name="clientSearch" value="${escapeAttr(selectedText)}" list="clientSearchOptions" data-client-search autocomplete="off" required>
+      <input name="clientId" type="hidden" value="${escapeAttr(value || "")}" data-client-id>
+      <datalist id="clientSearchOptions">
+        ${state.data.clients.map((client) => `<option value="${escapeAttr(clientSearchText(client))}"></option>`).join("")}
+      </datalist>
+      <small class="client-search-hint">${state.lang === "he" ? "הקלידי שם או טלפון ובחרי לקוח מהרשימה" : "اكتبي الاسم أو الهاتف واختاري العميل من القائمة"}</small>
+    </div>
+  `;
+}
+
 function formPayloadLegacy(resource, form) {
   if (resource === "clients") return { ...form, therapistId: numberOrNull(form.therapistId) };
   if (resource === "appointments") return { ...form, clientId: Number(form.clientId), serviceId: Number(form.serviceId), therapistId: Number(form.therapistId) };
@@ -1357,6 +1377,22 @@ function numberOrNull(value) {
 
 function therapists() {
   return state.data.users.filter((u) => u.role === "therapist" && u.active).map((u) => [u.id, u.name]);
+}
+
+function clientSearchText(client) {
+  return `${client.fname || ""} ${client.lname || ""}${client.phone ? ` - ${client.phone}` : ""}`.trim();
+}
+
+function syncClientSearch(form, showError = true) {
+  const search = form.querySelector("[data-client-search]");
+  const hidden = form.querySelector("[data-client-id]");
+  if (!search || !hidden) return true;
+  const typed = search.value.trim();
+  const client = state.data.clients.find((item) => clientSearchText(item) === typed);
+  hidden.value = client?.id || "";
+  search.setCustomValidity(client ? "" : (state.lang === "he" ? "יש לבחור לקוח מהרשימה" : "يجب اختيار عميل من القائمة"));
+  if (!client && showError) search.reportValidity();
+  return Boolean(client);
 }
 
 function userName(id) {
@@ -1747,7 +1783,7 @@ function formFieldsHe(resource, row) {
     const isCalendarNew = row.fromCalendar && !row.id;
     const therapistValue = isCalendarNew ? "" : row.therapistId || state.user.id;
     const therapistRequired = isCalendarNew ? true : state.user.role !== "therapist";
-    return html`${select("clientId", he ? "לקוח" : "العميل", state.data.clients.map((c) => [c.id, `${c.fname} ${c.lname}`]), row.clientId || "", true)}${select("serviceId", he ? "שירות" : "الخدمة", state.data.services.filter((s) => s.active).map((s) => [s.id, s.name]), row.serviceId || "", true)}${select("therapistId", he ? "מטפלת" : "المعالجة", therapists(), therapistValue, therapistRequired)}${field("date", he ? "תאריך" : "التاريخ", row.date || new Date().toISOString().slice(0, 10), "date")}${field("time", he ? "שעה" : "الوقت", row.time || "09:00", "time")}${select("status", he ? "סטטוס" : "الحالة", [["pending", statusLabel.pending], ["done", statusLabel.done], ["cancelled", statusLabel.cancelled]], row.status || "pending")}${select("paymentStatus", he ? "מצב תשלום" : "حالة الدفع", [["unpaid", paymentLabel.unpaid], ["paid", paymentLabel.paid], ["deposit", paymentLabel.deposit]], row.paymentStatus || "unpaid")}${field("paidAmount", he ? "סכום ששולם" : "المبلغ المدفوع", row.paidAmount || 0, "number", false)}${field("notes", he ? "הערות" : "ملاحظات", row.notes, "textarea", false, "full")}`;
+    return html`${searchableClientField(row.clientId || "")}${select("serviceId", he ? "שירות" : "الخدمة", state.data.services.filter((s) => s.active).map((s) => [s.id, s.name]), row.serviceId || "", true)}${select("therapistId", he ? "מטפלת" : "المعالجة", therapists(), therapistValue, therapistRequired)}${field("date", he ? "תאריך" : "التاريخ", row.date || new Date().toISOString().slice(0, 10), "date")}${field("time", he ? "שעה" : "الوقت", row.time || "09:00", "time")}${select("status", he ? "סטטוס" : "الحالة", [["pending", statusLabel.pending], ["done", statusLabel.done], ["cancelled", statusLabel.cancelled]], row.status || "pending")}${select("paymentStatus", he ? "מצב תשלום" : "حالة الدفع", [["unpaid", paymentLabel.unpaid], ["paid", paymentLabel.paid], ["deposit", paymentLabel.deposit]], row.paymentStatus || "unpaid")}${field("paidAmount", he ? "סכום ששולם" : "المبلغ المدفوع", row.paidAmount || 0, "number", false)}${field("notes", he ? "הערות" : "ملاحظات", row.notes, "textarea", false, "full")}`;
   }
   if (resource === "categories") return field("name", he ? "שם קטגוריה" : "اسم القسم", row.name);
   if (resource === "services") return html`${field("name", he ? "שם שירות" : "اسم الخدمة", row.name)}${select("categoryId", he ? "קטגוריה" : "القسم", state.data.categories.map((c) => [c.id, c.name]), row.categoryId)}${field("duration", he ? "משך בדקות" : "المدة بالدقائق", row.duration || 60, "number")}${field("price", he ? "מחיר" : "السعر", row.price || 0, "number")}${select("active", he ? "פעיל" : "فعال", [["true", yesNo(true)], ["false", yesNo(false)]], String(row.active !== false))}`;
@@ -1925,10 +1961,14 @@ function openForm(resource, id = null, defaults = {}) {
       <div class="modal-foot"><button class="btn">שמירה</button><div id="formError" class="muted"></div></div>
     </form></div>`;
   document.getElementById("closeModal").addEventListener("click", closeModal);
+  const clientSearch = document.querySelector("[data-client-search]");
+  if (clientSearch) clientSearch.addEventListener("input", () => syncClientSearch(document.getElementById("entityForm"), false));
   document.getElementById("entityForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
+      if (!syncClientSearch(event.currentTarget)) return;
       const body = formPayload(resource, Object.fromEntries(new FormData(event.currentTarget)));
+      delete body.clientSearch;
       await api(`/api/${resource}${id ? `/${id}` : ""}`, { method: id ? "PUT" : "POST", body });
       closeModal();
       await loadData();

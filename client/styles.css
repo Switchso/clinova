@@ -139,6 +139,18 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus { border-color: var(--primary); }
 textarea { min-height: 82px; resize: vertical; }
 
+.searchable-client {
+  position: relative;
+}
+
+.client-search-hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
