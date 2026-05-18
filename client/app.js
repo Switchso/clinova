@@ -977,6 +977,11 @@ function bindPageActions() {
     state.calendarDate = new Date().toISOString().slice(0, 10);
     renderApp();
   }));
+  document.querySelectorAll("[data-calendar-date]").forEach((day) => day.addEventListener("click", (event) => {
+    if (event.target.closest("[data-open-appointment]")) return;
+    state.calendarDate = day.dataset.calendarDate;
+    openForm("appointments", null, { date: day.dataset.calendarDate });
+  }));
   document.querySelectorAll("[data-receipt]").forEach((button) => button.addEventListener("click", () => printReceipt(Number(button.dataset.receipt))));
   document.querySelectorAll("[data-whatsapp]").forEach((button) => button.addEventListener("click", () => sendReminder(Number(button.dataset.whatsapp), "whatsapp")));
   document.querySelectorAll("[data-sign-appointment]").forEach((button) => button.addEventListener("click", () => openAppointmentConsent(Number(button.dataset.signAppointment))));
@@ -1786,7 +1791,7 @@ function calendarDay(day, view) {
   const date = toDateInput(day);
   const rows = state.data.appointments.filter((a) => a.date === date).sort((a, b) => a.time.localeCompare(b.time));
   return html`
-    <section class="calendar-day ${date === new Date().toISOString().slice(0, 10) ? "today" : ""}">
+    <section class="calendar-day ${date === new Date().toISOString().slice(0, 10) ? "today" : ""}" data-calendar-date="${date}">
       <header><strong>${day.getDate()}</strong><span>${date}</span></header>
       <div class="calendar-events">
         ${rows.map((a) => `<button data-open-appointment="${a.id}" class="calendar-event ${a.status}"><span>${a.time}</span><strong>${a.clientName}</strong><em>${a.serviceName}</em></button>`).join("") || `<div class="calendar-empty">${view === "month" ? "" : "אין תורים"}</div>`}
