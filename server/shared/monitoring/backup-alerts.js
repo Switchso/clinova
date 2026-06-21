@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { win32 } from "node:path";
 
 const badStatuses = new Set(["stale", "missing", "unreadable"]);
 const defaultDedupeWindowMinutes = 720;
@@ -35,7 +35,7 @@ function safeDetailsFor(result, showPaths) {
     details.latestBackupAgeHours = result.latestBackupAgeHours;
   }
   if (result.latestBackupPath) {
-    details.latestBackupName = basename(result.latestBackupPath);
+    details.latestBackupName = win32.basename(result.latestBackupPath);
   }
   if (showPaths) {
     if (result.backupDir) details.backupDir = result.backupDir;

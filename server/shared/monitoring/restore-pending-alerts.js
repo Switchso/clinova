@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { win32 } from "node:path";
 
 const badStatuses = new Set(["pending", "stale", "partial", "invalid", "unreadable"]);
 const invalidStatuses = new Set(["partial", "invalid", "unreadable"]);
@@ -43,8 +43,8 @@ function safeMetadata(metadata, showPaths) {
   };
 
   if (!showPaths) {
-    if (typeof summary.source === "string") summary.source = basename(summary.source);
-    if (typeof summary.safetyBackup === "string") summary.safetyBackup = basename(summary.safetyBackup);
+    if (typeof summary.source === "string") summary.source = win32.basename(summary.source);
+    if (typeof summary.safetyBackup === "string") summary.safetyBackup = win32.basename(summary.safetyBackup);
   }
 
   const filtered = Object.fromEntries(Object.entries(summary).filter(([, value]) => value !== undefined));
