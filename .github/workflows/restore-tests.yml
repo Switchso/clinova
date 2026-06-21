@@ -14,9 +14,6 @@ jobs:
     env:
       NODE_ENV: test
       DATABASE_URL: ""
-      DATABASE_PATH: ${{ runner.temp }}/clinova-restore-ci-db.sqlite
-      UPLOAD_DIR: ${{ runner.temp }}/clinova-restore-ci-uploads
-      BACKUP_DIR: ${{ runner.temp }}/clinova-restore-ci-backups
       BACKUP_ENABLED: "false"
       BACKUP_RUN_ON_START: "false"
       WHATSAPP_ENABLED: "false"
@@ -33,6 +30,12 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+
+      - name: Configure isolated restore paths
+        run: |
+          echo "DATABASE_PATH=$RUNNER_TEMP/clinova-restore-ci-db.sqlite" >> "$GITHUB_ENV"
+          echo "UPLOAD_DIR=$RUNNER_TEMP/clinova-restore-ci-uploads" >> "$GITHUB_ENV"
+          echo "BACKUP_DIR=$RUNNER_TEMP/clinova-restore-ci-backups" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: npm ci
