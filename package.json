@@ -8,7 +8,7 @@
     "dev": "node --watch server/app.js",
     "test:api": "node --test server/tests/api-smoke.test.js server/tests/authenticated-read.test.js server/tests/isolated-crud.test.js server/tests/files-consents.test.js server/tests/platform-workflows.test.js server/tests/security-negative.test.js server/tests/restore-helper.test.js server/tests/backup-freshness.test.js server/tests/backup-freshness-cli.test.js server/tests/backup-alerts.test.js server/tests/restore-pending.test.js server/tests/restore-pending-cli.test.js server/tests/restore-pending-alerts.test.js server/tests/pm2-status.test.js server/tests/pm2-status-cli.test.js server/tests/mock-fetch-preload.test.js server/tests/whatsapp-no-send.test.js server/tests/whatsapp-dry-run.test.js server/tests/whatsapp-provider-failure.test.js server/tests/whatsapp-provider-http-failure.test.js",
     "test:restore": "node --test server/tests/restore-valid.test.js",
-    "init-db": "node server/app.js --init-db",
+    "init-db": "node server/scripts/init-db.js",
     "db:check": "node server/check-db.js",
     "backup": "node server/backup.js",
     "monitor:backup": "node server/scripts/check-backup-freshness.js",
