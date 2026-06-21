@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { config } from "../config.js";
 import {
@@ -20,6 +20,30 @@ import {
 
 function pdfSafeText(value) {
   return String(value ?? "").slice(0, 120);
+}
+
+const consentFontPaths = [
+  resolve("server/assets/fonts/DejaVuSans.ttf"),
+  resolve("assets/fonts/DejaVuSans.ttf"),
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+  "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+  "C:\\Windows\\Fonts\\arial.ttf",
+  "C:\\Windows\\Fonts\\Arial.ttf",
+];
+
+async function embedConsentFont(pdf) {
+  const fontPath = consentFontPaths.find((candidate) => existsSync(candidate));
+  if (fontPath) {
+    pdf.registerFontkit(fontkit);
+    return { font: await pdf.embedFont(readFileSync(fontPath), { subset: true }), unicode: true };
+  }
+  return { font: await pdf.embedFont(StandardFonts.Helvetica), unicode: false };
+}
+
+function consentFontText(value, unicode) {
+  const text = pdfSafeText(value);
+  return unicode ? text : text.replace(/[^\x20-\x7E]/g, "?");
 }
 
 function consentPdfLabels(lang = "he") {
@@ -63,19 +87,17 @@ async function createSignedConsentClientFile({ signatureId, tenantId, templateId
 
   const labels = consentPdfLabels(lang);
   const pdf = await PDFDocument.load(readFileSync(template.path));
-  pdf.registerFontkit(fontkit);
-  const fontPath = existsSync("C:\\Windows\\Fonts\\arial.ttf") ? "C:\\Windows\\Fonts\\arial.ttf" : "C:\\Windows\\Fonts\\Arial.ttf";
-  const font = await pdf.embedFont(readFileSync(fontPath), { subset: true });
+  const { font, unicode } = await embedConsentFont(pdf);
   const page = pdf.addPage();
   const { width, height } = page.getSize();
-  page.drawText(labels.title, { x: 48, y: height - 70, size: 20, font, color: rgb(0.18, 0.42, 0.31) });
-  page.drawText(`${labels.form}: ${pdfSafeText(template.title)}`, { x: 48, y: height - 110, size: 12, font });
-  page.drawText(`${labels.client}: ${pdfSafeText(`${client.fname} ${client.lname}`)}`, { x: 48, y: height - 132, size: 12, font });
-  page.drawText(`${labels.signer}: ${pdfSafeText(signerName)}`, { x: 48, y: height - 154, size: 12, font });
-  page.drawText(`${labels.appointment}: ${appointmentId || "-"}`, { x: 48, y: height - 176, size: 12, font });
-  page.drawText(`${labels.signedAt}: ${signedAt}`, { x: 48, y: height - 198, size: 12, font });
+  page.drawText(consentFontText(labels.title, unicode), { x: 48, y: height - 70, size: 20, font, color: rgb(0.18, 0.42, 0.31) });
+  page.drawText(consentFontText(`${labels.form}: ${pdfSafeText(template.title)}`, unicode), { x: 48, y: height - 110, size: 12, font });
+  page.drawText(consentFontText(`${labels.client}: ${pdfSafeText(`${client.fname} ${client.lname}`)}`, unicode), { x: 48, y: height - 132, size: 12, font });
+  page.drawText(consentFontText(`${labels.signer}: ${pdfSafeText(signerName)}`, unicode), { x: 48, y: height - 154, size: 12, font });
+  page.drawText(consentFontText(`${labels.appointment}: ${appointmentId || "-"}`, unicode), { x: 48, y: height - 176, size: 12, font });
+  page.drawText(consentFontText(`${labels.signedAt}: ${signedAt}`, unicode), { x: 48, y: height - 198, size: 12, font });
   page.drawRectangle({ x: 48, y: height - 385, width: width - 96, height: 145, borderColor: rgb(0.18, 0.42, 0.31), borderWidth: 1 });
-  page.drawText(labels.signatureStamp, { x: 60, y: height - 260, size: 11, font, color: rgb(0.42, 0.55, 0.48) });
+  page.drawText(consentFontText(labels.signatureStamp, unicode), { x: 60, y: height - 260, size: 11, font, color: rgb(0.42, 0.55, 0.48) });
 
   const signatureBytes = Buffer.from(String(signatureData).split(",")[1] || "", "base64");
   if (signatureBytes.length) {
