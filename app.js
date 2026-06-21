@@ -62,14 +62,14 @@ function renderLogin(error = "") {
     <main class="login">
       <form class="login-card" id="loginForm">
         <div class="brand">
-          <img class="brand-logo" src="/logo.svg" alt="CMS SUZAN">
+          <img class="brand-logo" src="/logo.svg" alt="Clinova">
           <div>
-            <h1>CMS SUZAN</h1>
+            <h1>Clinova</h1>
             <div class="muted">نظام إدارة العيادة</div>
           </div>
         </div>
         <div class="login-note">
-          <strong>CMS SUZAN</strong>
+          <strong>Clinova</strong>
           <span>إدارة المواعيد والعملاء والخدمات والتقارير من مكان واحد آمن.</span>
         </div>
         ${error ? `<div class="alert">${error}</div>` : ""}
@@ -107,8 +107,8 @@ function renderApp() {
     <div class="shell">
       <aside class="sidebar">
         <div class="brand">
-          <img class="brand-logo" src="/logo.svg" alt="CMS SUZAN">
-          <div><h3>CMS SUZAN</h3><div style="opacity:.75;font-size:12px">إدارة العيادة</div></div>
+          <img class="brand-logo" src="/logo.svg" alt="Clinova">
+          <div><h3>Clinova</h3><div style="opacity:.75;font-size:12px">إدارة العيادة</div></div>
         </div>
         <nav class="nav">
           ${nav.map((page) => `<button data-page="${page}" class="${state.page === page ? "active" : ""}">${labels[page]}</button>`).join("")}
