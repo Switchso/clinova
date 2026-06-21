@@ -1,4 +1,4 @@
-# ربط CMS SUZAN مع GitHub والتحديث المستمر
+# ربط Clinova مع GitHub والتحديث المستمر
 
 هذا المسار يجعل السيرفر يسحب التحديثات من GitHub ثم يعمل `pm2 reload` بدون الحاجة لإيقاف النظام يدوياً.
 
@@ -9,21 +9,21 @@
 ```bash
 git init
 git add .
-git commit -m "release: cms suzan 1.2.0"
+git commit -m "release: clinova 1.2.0"
 git branch -M main
-git remote add origin git@github.com:YOUR_USER/cms-suzan.git
+git remote add origin git@github.com:YOUR_USER/clinova.git
 git tag v1.2.0
 git push -u origin main --tags
 ```
 
-استبدل `YOUR_USER/cms-suzan` باسم المستودع الحقيقي.
+استبدل `YOUR_USER/clinova` باسم المستودع الحقيقي.
 
 ## 2. تجهيز SSH بين السيرفر و GitHub
 
 على السيرفر:
 
 ```bash
-ssh-keygen -t ed25519 -C "cms-suzan-server"
+ssh-keygen -t ed25519 -C "clinova-server"
 cat ~/.ssh/id_ed25519.pub
 ```
 
@@ -36,8 +36,8 @@ cat ~/.ssh/id_ed25519.pub
 ## 3. أول تثبيت على السيرفر
 
 ```bash
-export REPO_URL=git@github.com:YOUR_USER/cms-suzan.git
-export APP_DIR=/var/www/cms-suzan
+export REPO_URL=git@github.com:YOUR_USER/clinova.git
+export APP_DIR=/var/www/clinova
 export BRANCH=main
 bash deploy/server-first-install.sh
 ```
@@ -61,7 +61,7 @@ npm exec pm2 save
 على السيرفر:
 
 ```bash
-cd /var/www/cms-suzan
+cd /var/www/clinova
 bash deploy/update-from-github.sh
 ```
 
@@ -85,7 +85,7 @@ crontab -e
 أضف:
 
 ```cron
-*/5 * * * * cd /var/www/cms-suzan && BRANCH=main bash deploy/update-from-github.sh >> logs/deploy.log 2>&1
+*/5 * * * * cd /var/www/clinova && BRANCH=main bash deploy/update-from-github.sh >> logs/deploy.log 2>&1
 ```
 
 إذا لا تريد أن يسحب السيرفر كل 5 دقائق، استخدم GitHub Actions أو webhook لاحقاً.

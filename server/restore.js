@@ -9,6 +9,11 @@ if (!sourceArg) {
   process.exit(1);
 }
 
+if (config.databaseUrl) {
+  console.error("SQLite restore is disabled when DATABASE_URL is set. Use pg_restore for PostgreSQL backups.");
+  process.exit(1);
+}
+
 const source = resolve(sourceArg);
 if (!existsSync(source)) {
   console.error(`Backup file not found: ${source}`);

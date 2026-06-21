@@ -1,0 +1,64 @@
+import { json } from "../shared/http/json-response.js";
+import { apiNotFound } from "../shared/http/api-not-found.js";
+import { requirePermission } from "../services/permissions.service.js";
+import { addAppointment, editAppointment, getAppointments, removeAppointment } from "../services/appointments.service.js";
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  if (chunks.length === 0) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    const error = new Error("Invalid JSON body");
+    error.status = 400;
+    throw error;
+  }
+}
+
+export async function handleAppointmentsRoute(req, res, url) {
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts[2] && !/^\d+$/.test(parts[2])) {
+    apiNotFound(res);
+    return true;
+  }
+  const id = parts[2] ? Number(parts[2]) : null;
+
+  if (id && parts[3]) {
+    apiNotFound(res);
+    return true;
+  }
+
+  const key = req.method === "DELETE" ? "appointments_delete" : req.method === "GET" ? "appointments_read" : "appointments_write";
+  const permission = await requirePermission(req, key);
+  if (!permission.ok) {
+    json(res, permission.status, permission.body);
+    return true;
+  }
+
+  if (req.method === "GET" && !id) {
+    const result = await getAppointments(permission.user);
+    json(res, result.status, result.body);
+    return true;
+  }
+
+  if (req.method === "POST" && !id) {
+    const result = await addAppointment(permission.user, await readBody(req));
+    json(res, result.status, result.body);
+    return true;
+  }
+
+  if (req.method === "PUT" && id) {
+    const result = await editAppointment(permission.user, id, await readBody(req));
+    json(res, result.status, result.body);
+    return true;
+  }
+
+  if (req.method === "DELETE" && id) {
+    const result = await removeAppointment(permission.user, id);
+    json(res, result.status, result.body);
+    return true;
+  }
+
+  return false;
+}

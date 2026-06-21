@@ -1,4 +1,4 @@
-name: CI/CD Deploy CMS SUZAN
+name: CI/CD Deploy Clinova
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: cms-suzan-production
+  group: clinova-production
   cancel-in-progress: false
 
 jobs:
@@ -54,8 +54,8 @@ jobs:
           test -n "$SSH_HOST"
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/cms_suzan_deploy_key
-          chmod 600 ~/.ssh/cms_suzan_deploy_key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/clinova_deploy_key
+          chmod 600 ~/.ssh/clinova_deploy_key
           ssh-keyscan -p "${SSH_PORT:-22}" "$SSH_HOST" >> ~/.ssh/known_hosts
 
       - name: Deploy over SSH
@@ -67,9 +67,9 @@ jobs:
           HEALTH_URL: ${{ secrets.HEALTH_URL }}
         run: |
           test -n "$SSH_USER"
-          ssh -i ~/.ssh/cms_suzan_deploy_key \
+          ssh -i ~/.ssh/clinova_deploy_key \
             -p "${SSH_PORT:-22}" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "APP_DIR='${APP_DIR:-/var/www/cms-suzan}' BRANCH='main' HEALTH_URL='${HEALTH_URL:-http://127.0.0.1:3000/api/health}' bash deploy/update-from-github.sh"
+            "APP_DIR='${APP_DIR:-/var/www/clinova}' BRANCH='main' HEALTH_URL='${HEALTH_URL:-http://127.0.0.1:3000/api/health}' bash deploy/update-from-github.sh"

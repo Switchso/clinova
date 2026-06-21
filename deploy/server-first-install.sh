@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${REPO_URL:?Set REPO_URL, example: git@github.com:YOUR_USER/cms-suzan.git}"
-APP_DIR="${APP_DIR:-/var/www/cms-suzan}"
+REPO_URL="${REPO_URL:?Set REPO_URL, example: git@github.com:YOUR_USER/clinova.git}"
+APP_DIR="${APP_DIR:-/var/www/clinova}"
 BRANCH="${BRANCH:-main}"
 
-echo "==> Cloning CMS SUZAN"
+echo "==> Cloning Clinova"
 sudo mkdir -p "$(dirname "$APP_DIR")"
 sudo chown "$USER":"$USER" "$(dirname "$APP_DIR")"
 

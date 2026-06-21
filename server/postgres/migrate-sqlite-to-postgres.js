@@ -6,12 +6,16 @@ import { config } from "../config.js";
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is required. Example: postgres://user:pass@host:5432/cms_suzan");
+  console.error("DATABASE_URL is required. Example: postgres://user:pass@host:5432/clinova");
   process.exit(1);
 }
 
 const sqlite = new DatabaseSync(config.databasePath, { readOnly: true });
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
+  ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslRejectUnauthorized } : undefined,
+});
 
 async function main() {
   const client = await pool.connect();
@@ -27,6 +31,8 @@ async function main() {
     await copyClients(client);
     await copyAppointments(client);
     await copySettings(client);
+    await copyTenantDomains(client);
+    await copyBillingInvoices(client);
     await copyClientFiles(client);
     await copyAudit(client);
     await resetSequences(client);
@@ -44,16 +50,16 @@ async function main() {
 }
 
 async function clearTables(client) {
-  await client.query("TRUNCATE audit_log, sessions, client_files, clinic_settings, appointments, clients, services, categories, users RESTART IDENTITY CASCADE");
+  await client.query("TRUNCATE audit_log, sessions, user_invitations, message_logs, client_files, clinic_settings, billing_invoices, tenant_domains, appointments, crm_events, crm_tasks, clients, services, categories, users RESTART IDENTITY CASCADE");
 }
 
 async function copyUsers(client) {
   const rows = sqlite.prepare("SELECT * FROM users ORDER BY id").all();
   for (const row of rows) {
     await client.query(
-      `INSERT INTO users (id, username, password_hash, name, title, role, workdays, service_ids, active, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [row.id, row.username, row.password_hash, row.name, row.title || "", row.role, row.workdays || "[]", row.service_ids || "[]", Number(row.active ?? 1), row.created_at, row.updated_at]
+      `INSERT INTO users (id, tenant_id, username, email, password_hash, name, title, role, workdays, service_ids, is_platform_owner, active, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [row.id, row.tenant_id || 1, row.username, row.email || "", row.password_hash, row.name, row.title || "", row.role, row.workdays || "[]", row.service_ids || "[]", Number(row.is_platform_owner || 0), Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -83,9 +89,9 @@ async function copyClients(client) {
   const rows = sqlite.prepare("SELECT * FROM clients ORDER BY id").all();
   for (const row of rows) {
     await client.query(
-      `INSERT INTO clients (id, fname, lname, phone, email, therapist_id, notes, active, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [row.id, row.fname, row.lname, row.phone, row.email || "", row.therapist_id || null, row.notes || "", Number(row.active ?? 1), row.created_at, row.updated_at]
+      `INSERT INTO clients (id, tenant_id, fname, lname, phone, email, therapist_id, stage, source, tags, notes, active, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [row.id, row.tenant_id || 1, row.fname, row.lname, row.phone, row.email || "", row.therapist_id || null, row.stage || "lead", row.source || "", row.tags || "[]", row.notes || "", Number(row.active ?? 1), row.created_at, row.updated_at]
     );
   }
 }
@@ -119,8 +125,46 @@ async function copySettings(client) {
   const rows = sqlite.prepare("SELECT * FROM clinic_settings ORDER BY key").all();
   for (const row of rows) {
     await client.query(
-      "INSERT INTO clinic_settings (key, value, updated_at) VALUES ($1,$2,$3)",
-      [row.key, row.value, row.updated_at]
+      "INSERT INTO clinic_settings (tenant_id, key, value, updated_at) VALUES ($1,$2,$3,$4) ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+      [row.tenant_id || 1, row.key, row.value, row.updated_at]
+    );
+  }
+}
+
+async function copyBillingInvoices(client) {
+  const rows = sqlite.prepare("SELECT * FROM billing_invoices ORDER BY id").all();
+  for (const row of rows) {
+    await client.query(
+      `INSERT INTO billing_invoices (id, tenant_id, subscription_id, number, status, currency, amount, period_start, period_end, due_at, paid_at, notes, billing_cycle, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [
+        row.id,
+        row.tenant_id || 1,
+        row.subscription_id || null,
+        row.number,
+        row.status || "draft",
+        row.currency || "USD",
+        row.amount || 0,
+        row.period_start || null,
+        row.period_end || null,
+        row.due_at || null,
+        row.paid_at || null,
+        row.notes || "",
+        row.billing_cycle || "",
+        row.created_at,
+        row.updated_at,
+      ]
+    );
+  }
+}
+
+async function copyTenantDomains(client) {
+  const rows = sqlite.prepare("SELECT * FROM tenant_domains ORDER BY id").all();
+  for (const row of rows) {
+    await client.query(
+      `INSERT INTO tenant_domains (id, tenant_id, domain, status, is_primary, verified_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [row.id, row.tenant_id || 1, row.domain, row.status || "pending", Number(row.is_primary || 0), row.verified_at || null, row.created_at, row.updated_at]
     );
   }
 }
@@ -161,7 +205,7 @@ async function copyAudit(client) {
 }
 
 async function resetSequences(client) {
-  for (const table of ["users", "categories", "services", "clients", "appointments", "client_files", "audit_log"]) {
+  for (const table of ["users", "categories", "services", "clients", "crm_tasks", "crm_events", "appointments", "tenant_domains", "billing_invoices", "client_files", "message_logs", "user_invitations", "audit_log"]) {
     await client.query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE((SELECT MAX(id) FROM ${table}), 1), true)`);
   }
 }

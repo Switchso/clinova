@@ -1,11 +1,11 @@
-# CMS SUZAN - Version 1.2.0
+# Clinova - Version 1.2.0
 
 ## ملخص الإصدار
 
-هذا هو ملف تسليم الإصدار النهائي الحالي من نظام **CMS SUZAN**.
+هذا هو ملف تسليم الإصدار النهائي الحالي من نظام **Clinova**.
 
 - رقم الإصدار: `1.2.0`
-- اسم التطبيق في PM2: `cms-suzan`
+- اسم التطبيق في PM2: `clinova`
 - أمر التشغيل: `npm start`
 - ملف التشغيل الرئيسي: `server/app.js`
 - Health check: `/api/health`
@@ -41,14 +41,14 @@
 افتح GitHub وأنشئ Repository جديد باسم مناسب مثل:
 
 ```bash
-cms-suzan
+clinova
 ```
 
 داخل مجلد المشروع على جهازك:
 
 ```bash
 git status
-git remote add origin https://github.com/YOUR_USER/cms-suzan.git
+git remote add origin https://github.com/YOUR_USER/clinova.git
 git branch -M main
 git push -u origin main
 git push origin v1.2.0
@@ -57,7 +57,7 @@ git push origin v1.2.0
 إذا كان `origin` موجودا مسبقا:
 
 ```bash
-git remote set-url origin https://github.com/YOUR_USER/cms-suzan.git
+git remote set-url origin https://github.com/YOUR_USER/clinova.git
 git push -u origin main
 git push origin v1.2.0
 ```
@@ -122,16 +122,16 @@ sudo -u postgres psql
 داخل PostgreSQL:
 
 ```sql
-CREATE DATABASE cms_suzan;
-CREATE USER cms_suzan_user WITH ENCRYPTED PASSWORD 'CHANGE_STRONG_PASSWORD_HERE';
-GRANT ALL PRIVILEGES ON DATABASE cms_suzan TO cms_suzan_user;
+CREATE DATABASE clinova;
+CREATE USER clinova_user WITH ENCRYPTED PASSWORD 'CHANGE_STRONG_PASSWORD_HERE';
+GRANT ALL PRIVILEGES ON DATABASE clinova TO clinova_user;
 \q
 ```
 
 قيمة الاتصال ستكون بهذا الشكل:
 
 ```bash
-DATABASE_URL=postgres://cms_suzan_user:CHANGE_STRONG_PASSWORD_HERE@127.0.0.1:5432/cms_suzan
+DATABASE_URL=postgres://clinova_user:CHANGE_STRONG_PASSWORD_HERE@127.0.0.1:5432/clinova
 ```
 
 ## 5. تنزيل المشروع من GitHub على السيرفر
@@ -139,8 +139,8 @@ DATABASE_URL=postgres://cms_suzan_user:CHANGE_STRONG_PASSWORD_HERE@127.0.0.1:543
 ```bash
 mkdir -p /var/www
 cd /var/www
-git clone https://github.com/YOUR_USER/cms-suzan.git
-cd cms-suzan
+git clone https://github.com/YOUR_USER/clinova.git
+cd clinova
 npm install --production
 ```
 
@@ -157,7 +157,7 @@ nano .env
 NODE_ENV=production
 PORT=3000
 APP_URL=https://your-domain.com
-DATABASE_URL=postgres://cms_suzan_user:CHANGE_STRONG_PASSWORD_HERE@127.0.0.1:5432/cms_suzan
+DATABASE_URL=postgres://clinova_user:CHANGE_STRONG_PASSWORD_HERE@127.0.0.1:5432/clinova
 SESSION_SECRET=CHANGE_TO_LONG_RANDOM_SECRET
 ```
 
@@ -196,7 +196,7 @@ curl http://127.0.0.1:3000/api/version
 أنشئ ملف Nginx:
 
 ```bash
-sudo nano /etc/nginx/sites-available/cms-suzan
+sudo nano /etc/nginx/sites-available/clinova
 ```
 
 ضع هذا الإعداد مع تغيير الدومين:
@@ -222,7 +222,7 @@ server {
 فعّل الموقع:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/cms-suzan /etc/nginx/sites-enabled/cms-suzan
+sudo ln -s /etc/nginx/sites-available/clinova /etc/nginx/sites-enabled/clinova
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -293,7 +293,7 @@ git push origin main
 على السيرفر:
 
 ```bash
-cd /var/www/cms-suzan
+cd /var/www/clinova
 git pull origin main
 npm install --production
 npm run init-db

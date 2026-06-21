@@ -1,6 +1,6 @@
-# Clinic Management System
+# Clinova
 
-Production-ready clinic management app with a Node.js server, SQLite database, secure password hashing, session cookies, role permissions, and a browser UI.
+Production-ready clinic management app with a Node.js server, external PostgreSQL support, local SQLite fallback for development, secure password hashing, session cookies, role permissions, and a browser UI.
 
 ## Features
 
@@ -11,13 +11,14 @@ Production-ready clinic management app with a Node.js server, SQLite database, s
 - Reports and revenue summaries.
 - Admin audit log.
 - CSV export for clients and appointments.
-- SQLite backup script.
+- SQLite and PostgreSQL backup script.
 
 ## Run locally
 
 ```bash
 copy .env.example .env
 npm run init-db
+npm run db:check
 npm start
 ```
 
@@ -56,39 +57,53 @@ For GitHub-based updates, see [deploy/github-server-link.md](deploy/github-serve
 Production update command on the server:
 
 ```bash
-cd /var/www/cms-suzan
+cd /var/www/clinova
 bash deploy/update-from-github.sh
 ```
 
-The SQLite database is stored under `data/clinic.sqlite` by default. Back up the `data` folder regularly.
+SQLite is used only when `DATABASE_URL` is empty. For production or a database server on another machine, set `DATABASE_URL` to your PostgreSQL connection string.
 
-## PostgreSQL
+## External Database
 
-For daily multi-user production, use PostgreSQL.
+For daily multi-user production, use PostgreSQL on a separate database server.
 
 Create database and user:
 
 ```sql
-CREATE DATABASE cms_suzan;
-CREATE USER cms_suzan_user WITH ENCRYPTED PASSWORD 'CHANGE_ME';
-GRANT ALL PRIVILEGES ON DATABASE cms_suzan TO cms_suzan_user;
+CREATE DATABASE clinova;
+CREATE USER clinova_user WITH ENCRYPTED PASSWORD 'CHANGE_ME';
+GRANT ALL PRIVILEGES ON DATABASE clinova TO clinova_user;
 ```
 
 Set `DATABASE_URL` in `.env`:
 
 ```bash
-DATABASE_URL=postgres://cms_suzan_user:CHANGE_ME@127.0.0.1:5432/cms_suzan
+DATABASE_URL=postgres://clinova_user:CHANGE_ME@DB_SERVER_IP:5432/clinova
+DATABASE_SSL=false
 ```
 
-Load schema and migrate SQLite data into PostgreSQL:
+If your database provider requires SSL, use:
+
+```bash
+DATABASE_SSL=true
+DATABASE_SSL_REJECT_UNAUTHORIZED=true
+```
+
+Initialize the external database and verify the connection:
+
+```bash
+npm run init-db
+npm run db:check
+```
+
+To migrate existing SQLite data into PostgreSQL:
 
 ```bash
 npm run pg:migrate
 ```
 
 The included file [server/postgres/schema.sql](server/postgres/schema.sql) contains the PostgreSQL schema.
-
-Note: the current runtime still uses SQLite unless the app is later switched fully to PostgreSQL query adapters. The migration script prepares your production PostgreSQL database and data for that switch.
+When `DATABASE_URL` is set, Clinova runs directly on PostgreSQL.
 
 ## Backup
 
@@ -96,17 +111,19 @@ Note: the current runtime still uses SQLite unless the app is later switched ful
 npm run backup
 ```
 
-This creates a timestamped copy under `backups/`.
+This creates a timestamped copy under `backups/`. PostgreSQL backups require the `pg_dump` command to be installed on the application server.
 
 ## Restore
 
-Stop the server first, then run:
+SQLite restore only: stop the server first, then run:
 
 ```bash
 npm run restore -- backups/clinic.sqlite.YYYY-MM-DD.bak
 ```
 
 Start the server again after restore.
+
+For PostgreSQL, restore with `pg_restore` on the database server.
 
 ## Production Checklist
 
@@ -122,8 +139,8 @@ Start the server again after restore.
 Use:
 
 ```bash
-sudo cp deploy/nginx/cms-suzan.conf /etc/nginx/sites-available/cms-suzan
-sudo ln -s /etc/nginx/sites-available/cms-suzan /etc/nginx/sites-enabled/cms-suzan
+sudo cp deploy/nginx/clinova.conf /etc/nginx/sites-available/clinova
+sudo ln -s /etc/nginx/sites-available/clinova /etc/nginx/sites-enabled/clinova
 sudo nginx -t
 sudo systemctl reload nginx
 ```

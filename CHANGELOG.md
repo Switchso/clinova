@@ -4,7 +4,7 @@
 
 - Started the next SaaS infrastructure release.
 - Added automatic backup configuration through environment variables.
-- Added a PM2 backup worker (`cms-suzan-backup`) for scheduled backups.
+- Added a PM2 backup worker (`clinova-backup`) for scheduled backups.
 - Improved backup creation for SQLite using a consistent SQLite export.
 - Prepared backup flow for PostgreSQL using `pg_dump` when `DATABASE_URL` is active.
 - Added backup retention cleanup.

@@ -1,0 +1,28 @@
+import {
+  auditSettings,
+  clinicSettings,
+  findTenantDetails,
+  findTenantSummary,
+  updateClinicSettings,
+  updateTenantProfile,
+} from "../repositories/settings.repository.js";
+
+export async function getSettings(user) {
+  return { status: 200, body: { settings: await clinicSettings(user.tenantId) } };
+}
+
+export async function saveSettings(user, body) {
+  await updateClinicSettings(body, user.tenantId);
+  await auditSettings(user.id, "update", "settings", null, { tenantId: user.tenantId });
+  return { status: 200, body: { settings: await clinicSettings(user.tenantId) } };
+}
+
+export async function getTenant(user) {
+  return { status: 200, body: { tenant: await findTenantDetails(user.tenantId) } };
+}
+
+export async function saveTenant(user, body) {
+  await updateTenantProfile(user.tenantId, body);
+  await auditSettings(user.id, "update", "tenants", user.tenantId, { tenantId: user.tenantId });
+  return { status: 200, body: { tenant: await findTenantSummary(user.tenantId) } };
+}

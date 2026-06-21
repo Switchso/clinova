@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "cms-suzan",
+      name: "clinova",
       script: "server/app.js",
       cwd: __dirname,
       instances: process.env.DATABASE_URL ? (process.env.WEB_CONCURRENCY || 2) : 1,
@@ -19,7 +19,7 @@ module.exports = {
       log_date_format: "YYYY-MM-DD HH:mm:ss"
     },
     {
-      name: "cms-suzan-backup",
+      name: "clinova-backup",
       script: "server/backup-scheduler.js",
       cwd: __dirname,
       instances: 1,

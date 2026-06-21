@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="${APP_NAME:-cms-suzan}"
-APP_DIR="${APP_DIR:-/var/www/cms-suzan}"
+APP_NAME="${APP_NAME:-clinova}"
+APP_DIR="${APP_DIR:-/var/www/clinova}"
 BRANCH="${BRANCH:-main}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PORT:-3000}/api/health}"
-LOCK_DIR="${LOCK_DIR:-/tmp/cms-suzan-deploy.lock}"
+LOCK_DIR="${LOCK_DIR:-/tmp/clinova-deploy.lock}"
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "Another deployment is already running: $LOCK_DIR"

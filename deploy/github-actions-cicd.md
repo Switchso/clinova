@@ -1,4 +1,4 @@
-# CMS SUZAN GitHub CI/CD
+# Clinova GitHub CI/CD
 
 ## ماذا يفعل المسار التلقائي
 
@@ -32,7 +32,7 @@ SSH_PRIVATE_KEY=PRIVATE_SSH_KEY_CONTENT
 
 ```text
 SSH_PORT=22
-APP_DIR=/var/www/cms-suzan
+APP_DIR=/var/www/clinova
 HEALTH_URL=http://127.0.0.1:3000/api/health
 ```
 
@@ -58,8 +58,8 @@ sudo chmod 600 /home/deploy/.ssh/authorized_keys
 sudo mkdir -p /var/www
 sudo chown -R deploy:deploy /var/www
 cd /var/www
-git clone git@github.com:YOUR_USER/cms-suzan.git cms-suzan
-cd cms-suzan
+git clone git@github.com:YOUR_USER/clinova.git clinova
+cd clinova
 cp .env.production.example .env
 nano .env
 npm ci --omit=dev
@@ -72,7 +72,7 @@ npm exec pm2 save
 
 من GitHub:
 
-`Actions > CI/CD Deploy CMS SUZAN > Run workflow`
+`Actions > CI/CD Deploy Clinova > Run workflow`
 
 أو من جهازك:
 

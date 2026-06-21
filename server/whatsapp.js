@@ -17,7 +17,7 @@ export function renderReminderMessage(appointment, settings = {}) {
   const template = settings.whatsappTemplate || "שלום {client}, תזכורת לתור שלך ב-{clinic} בתאריך {date} בשעה {time}.";
   return String(template)
     .replaceAll("{client}", appointment.clientName || "")
-    .replaceAll("{clinic}", settings.clinicName || "CMS SUZAN")
+    .replaceAll("{clinic}", settings.clinicName || "Clinova")
     .replaceAll("{date}", appointment.date || "")
     .replaceAll("{time}", appointment.time || "")
     .replaceAll("{service}", appointment.serviceName || "");

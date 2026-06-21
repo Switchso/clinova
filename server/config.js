@@ -19,6 +19,9 @@ export const config = {
   host: process.env.HOST || "0.0.0.0",
   databasePath: resolve(process.env.DATABASE_PATH || "./data/clinic.sqlite"),
   databaseUrl: process.env.DATABASE_URL || "",
+  databaseSsl: String(process.env.DATABASE_SSL || "").toLowerCase() === "true",
+  databaseSslRejectUnauthorized: String(process.env.DATABASE_SSL_REJECT_UNAUTHORIZED || "true").toLowerCase() !== "false",
+  databaseConnectionTimeoutMs: Math.max(1000, Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS || 10000)),
   sessionSecret: process.env.SESSION_SECRET || "dev-only-change-me",
   cookieSecure: String(process.env.COOKIE_SECURE || "false").toLowerCase() === "true",
   backup: {

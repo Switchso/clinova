@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
 
-const APP_PREFIX = "cms-suzan";
+const APP_PREFIX = "clinova";
 
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -45,7 +45,7 @@ function backupPostgres() {
 
   const backupDir = ensureBackupDir();
   const target = resolve(backupDir, `${APP_PREFIX}-postgres-${timestamp()}.dump`);
-  const result = spawnSync("pg_dump", ["--format=custom", "--no-owner", "--file", target, config.databaseUrl], {
+  const result = spawnSync("pg_dump", ["--format=custom", "--no-owner", "--file", target, postgresDumpUrl()], {
     stdio: "pipe",
     encoding: "utf8",
   });
@@ -56,6 +56,15 @@ function backupPostgres() {
   }
 
   return target;
+}
+
+function postgresDumpUrl() {
+  if (!config.databaseSsl) return config.databaseUrl;
+  const url = new URL(config.databaseUrl);
+  if (!url.searchParams.has("sslmode")) {
+    url.searchParams.set("sslmode", config.databaseSslRejectUnauthorized ? "verify-full" : "require");
+  }
+  return url.toString();
 }
 
 function cleanupBackups() {
